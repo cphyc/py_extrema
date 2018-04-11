@@ -3,9 +3,17 @@ cimport numpy as np
 from numba import jit
 import itertools
 cimport cython
+from cython.parallel import parallel, prange
+from time import time
+
 from cython.view cimport array as cvarray
 
-#@cython.boundscheck(False)
+cdef double start_time = time()
+
+def my_print(str s):
+    print(time() - start_time, s)
+
+@cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
 cpdef compute_extrema(double[:, :, :] data):
@@ -29,6 +37,8 @@ cpdef compute_extrema(double[:, :, :] data):
     cdef np.ndarray[np.float64_t, ndim=4] xyz
     cdef np.ndarray[np.float64_t, ndim=2] xyz_small, eigvals
 
+    cdef np.ndarray[np.int64_t, ndim=1] II, JJ, KK, II0, JJ0, KK0
+    my_print('Entering')
     # Computing common coefficients
     xx = [-1, 0, 1]
     X, Y, Z = np.meshgrid(xx, xx, xx, indexing='ij')
@@ -64,8 +74,26 @@ cpdef compute_extrema(double[:, :, :] data):
     M = data.shape[1]
     L = data.shape[2]
 
+    my_print('Computed constant arrays')
     # Compute MM matrix
-    MM = np.empty((N, M, L, 9), dtype=np.float64)
+    MM = np.empty((9, N, M, L), dtype=np.float64)
+    # II0 = np.arange(0, N, dtype=np.int)
+    # JJ0 = np.arange(0, M, dtype=np.int)
+    # KK0 = np.arange(0, L, dtype=np.int)
+
+    # l = 6
+    # for ii in range(6):
+    #     II = np.mod(II0 + I[ii] - 1, N)
+    #     JJ = np.mod(JJ0 + J[ii] - 1, M)
+    #     KK = np.mod(KK0 + K[ii] - 1, L)
+    #     MM[ii, ...] = np.asarray(data)[II, JJ, KK]
+
+    #     if ii < 3:
+    #         tmpdiff = np.diff(data, axis=ii)
+    #         for jj in range(ii+1, 3):
+    #             MM[l, ...] = np.diff(tmpdiff, axis=jj).mean()
+    #             l += 1
+
     for i in range(N):
         for j in range(M):
             for k in range(L):
@@ -92,9 +120,9 @@ cpdef compute_extrema(double[:, :, :] data):
                         MM[i, j, k, 6+l] = np.diff(tmpdiff, axis=jj).mean()
                         l += 1
 
-    print('Correctly set matrices')
+    my_print('Correctly set matrices')
     # Get all coefficients at once
-    A = np.dot(MM, XXinv)
+    A = np.dot(np.swapaxes(MM, 0, 3), XXinv)
 
     # Get AA matrix
     AA = np.zeros((N, M, L, 3, 3), dtype=np.float64)
@@ -120,6 +148,7 @@ cpdef compute_extrema(double[:, :, :] data):
                 rhs[i, j, k, 2] = -A[i, j, k, 5]
 
     AAinv = np.linalg.inv(AA)
+    my_print('Inverted matrix of coefficients')
 
     xyz = np.zeros((N, M, L, 3), dtype=np.float64)
     mask = np.zeros((N, M, L), dtype=np.int16)
@@ -138,10 +167,10 @@ cpdef compute_extrema(double[:, :, :] data):
                         xyz[i, j, k, idim] = pos[idim]
                     count += 1
 
-
     AA_small = np.zeros((count, 3, 3), dtype=np.float64)
     xyz_small = np.zeros((count, 3), dtype=np.float64)
-    # Refill AA
+
+    # Select only the values
     count = 0
     for i in range(N):
         cell_center[0] = i
@@ -160,6 +189,7 @@ cpdef compute_extrema(double[:, :, :] data):
     # Compute eigenvalues
     eigvals = np.linalg.eigvalsh(AA_small)
 
+    my_print('Computed eigenvalues')
     return xyz_small, eigvals, AA_small
 
 @cython.wraparound(False)
@@ -193,6 +223,6 @@ cdef int mymod(int i, int N) nogil:
 #                 kk = (k0+k) % L
 #                 newData[i][j][k] = data[ii, jj, kk] - data0
 
-#     print(np.array(newData))
+#     my_print(np.array(newData))
 
 #     return newDataView
