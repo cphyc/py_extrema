@@ -6,7 +6,7 @@ except ImportError:
     fft = np.fft
 from numba import jit
 import logging
-
+from scipy.spatial import cKDTree as KDTree
 from .utils import FiniteDictionary, CriticalPoints, unravel_index
 
 # create a logging format
@@ -61,49 +61,6 @@ def copy_xyz(xyz_rela):
 
     return xyz.T, mask
 
-# # @jit
-# def copy_xyzold(xyz_rel):
-#     '''Extract the points that are close to their parent cell.'''
-#     import ipdb; ipdb.set_trace()
-#     shape = xyz_rel.shape[:-1]
-
-#     ndim = xyz_rel.shape[-1]
-#     xyz_copy = xyz_rel.reshape(-1, ndim)
-
-#     N = xyz_copy.shape[0]
-
-#     count = 0
-#     for ii in range(N):
-#         ok = True
-#         for idim in range(ndim):
-#             ok &= -1 < xyz_copy[ii, idim] < 1
-#             if not ok:
-#                 break
-
-#         if ok:
-#             count += 1
-
-#     xyz = np.zeros((count, ndim), dtype=xyz_rel.dtype)
-#     mask = np.zeros(N, dtype=bool)
-
-#     count = 0
-#     for ii in range(N):
-#         ok = True
-#         for idim in range(ndim):
-#             ok &= -1 < xyz_copy[ii, idim] < 1
-#             if not ok:
-#                 break
-
-#         mask[ii] = ok
-#         if ok:
-#             ijk = list(np.unravel_index(ii, shape))
-#             for idim in range(ndim):
-#                 xyz[count, idim] = ijk[idim] + xyz_copy[ii, idim]
-#             count += 1
-
-#     return xyz, mask
-
-
 @jit
 def distance2(a, b, N):
     """Compute the distance between two vectors with wrapping of size N."""
@@ -120,34 +77,92 @@ def distance2(a, b, N):
     return d2
 
 
-#@jit(nopython=True)
-def cleanup_pairs(xyz, kind, data_shape):
+@jit(nopython=True)
+def _cleanup_pairs_KDTree(xyz, kind, pairs, N, shape):
+    skip = np.zeros_like(kind, dtype=np.int8)
+    for i, j in pairs:
+        if kind[i] == kind[j] and skip[i] != 1 and skip[j] != 1:
+            ijk1 = unravel_index(i, shape)
+            ijk2 = unravel_index(j, shape)
+
+            d1 = distance2(xyz[i], ijk1, N)
+            d2 = distance2(xyz[j], ijk2, N)
+
+            if d1 > d2:
+                xyz[i, :] = -1
+                skip[i] = 1
+            else:
+                skip[j] = 1
+                xyz[j, :] = -1
+
+
+def cleanup_pairs_KDTree(xyz, kind, data_shape, dmin):
     npoint, ndim = xyz.shape
-    tmp = np.zeros(data_shape, dtype=np.int32)
     N = data_shape[0]
+    logger.debug('Building KDTree')
+    tree = KDTree(xyz)
 
-    ijk = [(0,)]*ndim
-    iold = 0
+    pairs = list(tree.query_pairs(dmin))
+    logger.debug('Removing close pairs')
+    _cleanup_pairs_KDTree(xyz, kind, pairs, N, data_shape)
 
-    Nextr = xyz.shape[0]
-    for inew in range(Nextr):
-        pos = xyz[inew, :]
-        for idim in range(ndim):
-            ijk[idim] = (int((np.round(xyz[inew, idim]))) % N, )
 
-        # Get index of old value
-        iold = tmp[ijk][0]
-        if iold > 0:
-            oldpos = xyz[iold, ...]
-            # Old is closer than old, keep new
-            if ( distance2(oldpos, ijk, N) > distance2(pos, ijk, N) and
-                 kind[inew] == kind[iold]):
-                tmp[ijk] = inew
-        else:
-            tmp[ijk] = inew
-    indexes = tmp[tmp > 0]
+@jit(nopython=True)
+def cleanup_pairs_N2(xyz, kind, data_shape):
+    N = data_shape[0]
+    npoint, ndim = xyz.shape
 
-    return xyz[indexes, :], indexes
+    for i in range(npoint):
+        p1 = xyz[i, :]
+        k1 = kind[i]
+        ijk1 = unravel_index(i, data_shape)
+        d1 = distance2(p1, ijk1, N)
+        if np.all(p1 == -1):
+            continue
+        for j in range(i+1, npoint):
+            p2 = xyz[j, :]
+            if k1 != kind[j] or np.all(p2 == -1):
+                continue
+
+            if distance2(p1, p2, N) < 1:
+                ijk2 = unravel_index(j, data_shape)
+                d2 = distance2(p2, ijk2, N)
+
+                # Keep 2
+                if d1 > d2:
+                    xyz[i, :] = -1
+                else:
+                    xyz[j, :] = -1
+
+
+#@jit(nopython=True)
+# def cleanup_pairsold(xyz, kind, data_shape):
+#     npoint, ndim = xyz.shape
+#     tmp = np.zeros(data_shape, dtype=np.int32)
+#     N = data_shape[0]
+
+#     ijk = [(0,)]*ndim
+#     iold = 0
+
+#     Nextr = xyz.shape[0]
+#     for inew in range(Nextr):
+#         pos = xyz[inew, :]
+#         for idim in range(ndim):
+#             ijk[idim] = (int((np.round(xyz[inew, idim]))) % N, )
+
+#         # Get index of old value
+#         iold = tmp[ijk][0]
+#         if iold > 0:
+#             oldpos = xyz[iold, ...]
+#             # Old is closer than old, keep new
+#             if ( distance2(oldpos, ijk, N) > distance2(pos, ijk, N) and
+#                  kind[inew] == kind[iold]):
+#                 tmp[ijk] = inew
+#         else:
+#             tmp[ijk] = inew
+#     indexes = tmp[tmp > 0]
+
+#     return xyz[indexes, :], indexes
 
 
 class ExtremaFinder(object):
@@ -162,9 +177,15 @@ class ExtremaFinder(object):
     kgrid = None  # The grid of Fourier kx, ky, ... modes
     k2 = None     # The grid of Fourier k^2
 
-    def __init__(self, data, cache_len=10):
+    clean_pairs_methods = ['KDTree', 'none', 'direct']
+    clean_pairs_method = None
+
+    dmin = 1  # Minimum distance between 2 points to merge them
+
+    def __init__(self, data, cache_len=10, clean_pairs_method='KDTree'):
         self.ndim = data.ndim
         ndim = self.ndim
+        self.clean_pairs_method = clean_pairs_method
 
         self.data_raw = data
         self.data_shape = data.shape
@@ -228,6 +249,26 @@ class ExtremaFinder(object):
         self.data_smooth[R] = fft.irfftn(data_f)
         return self.data_smooth[R]
 
+    def clean_pairs(self, xyz0, kind0):
+        if self.clean_pairs_method == 'KDTree':
+            cleanup_pairs_KDTree(xyz0, kind0, self.data_raw.shape, self.dmin)
+            mask = np.any(xyz0 != -1, axis=1)
+
+        elif self.clean_pairs_method == 'direct':
+            cleanup_pairs_N2(xyz0, kind0, self.data_raw.shape)
+            mask = np.any(xyz0 != -1, axis=1)
+
+        elif self.clean_pairs_method == 'none':
+            mask = np.ones(len(xyz0), dtype=bool)
+
+        else:
+            raise NotImplementedError(
+                'The method %s is not implemented to clean '
+                'pairs. Available methods are %s ' %
+                (self.clean_pairs_method, self.clean_pairs_methods))
+
+        return mask
+
     def find_extrema(self, R):
         """Find the extrema of the field smoothed at scale R (in pixel unit).
 
@@ -239,7 +280,6 @@ class ExtremaFinder(object):
         ndim = self.ndim
         kgrid = self.kgrid
         shape = self.data_shape
-        N = self.data_raw.shape[0]
 
         if R not in self.data_smooth_f:
             self.smooth(R)
@@ -295,12 +335,14 @@ class ExtremaFinder(object):
                      self.clean_pairs_method)
 
         # Remove duplicate points
-        xyz, indices = cleanup_pairs(xyz0, kind0, self.data_raw.shape)
+        mask = self.clean_pairs(xyz0, kind0)
+
+        xyz = xyz0[mask]
 
         data = CriticalPoints(
-            pos=xyz, eigvals=eigvals0[indices, ...],
-            kind=kind0[indices], hessian=hess0[indices, ...],
-            npt=len(indices)
+            pos=xyz, eigvals=eigvals0[mask, ...],
+            kind=kind0[mask], hessian=hess0[mask, ...],
+            npt=mask.sum()
         )
 
         return data
