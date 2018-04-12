@@ -9,9 +9,19 @@ import logging
 
 from .utils import FiniteDictionary, CriticalPoints, unravel_index
 
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+# create a logging format
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
+# Create a stream handler
+handler = logging.StreamHandler()
+handler.setFormatter(formatter)
+handler.setLevel(logging.DEBUG)
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Add handler to logger
+logger.addHandler(handler)
 
 
 @jit(nopython=True)
@@ -203,6 +213,7 @@ class ExtremaFinder(object):
 
     def fft_forward(self):
         """Compute the direct Fourier transform of the input data."""
+        logger.debug('Computing FFT of input')
         data = self.data_raw
         self.data_raw_f = fft.rfftn(data)
 
@@ -211,6 +222,7 @@ class ExtremaFinder(object):
         if R in self.data_smooth:
             return self.data_smooth[R]
 
+        logger.debug('Smoothing at scale %.3f', R)
         data_f = self.data_raw_f * np.exp(-self.k2 * R**2)
         self.data_smooth_f[R] = data_f
         self.data_smooth[R] = fft.irfftn(data_f)
@@ -278,7 +290,10 @@ class ExtremaFinder(object):
         # shape (npoint, )
         kind0 = (eigvals0 > 0).sum(axis=1)
 
-        logger.debug('Cleaning up pairs')
+        logger.info('Found %s extrema.', len(kind0))
+        logger.debug('Cleaning up pairs with method %s',
+                     self.clean_pairs_method)
+
         # Remove duplicate points
         xyz, indices = cleanup_pairs(xyz0, kind0, self.data_raw.shape)
 
