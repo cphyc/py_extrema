@@ -269,24 +269,27 @@ class ExtremaFinder(object):
 
         return mask
 
-    def find_extrema(self, R):
-        """Find the extrema of the field smoothed at scale R (in pixel unit).
+    def compute_derivatives(self, R):
+        """Compute the 1st and 2nd derivatives of the (Fourier) input.
+
+        Argument
+        --------
+        R: float
+            The smoothing scale.
 
         Return
         ------
-        data: CriticalPoints
-              The set of critical points found.
+        indices: (ndim, ndim, M)
+            The M indices of the hessian. M = ndim*(ndim+1)/2.
         """
-        ndim = self.ndim
-        kgrid = self.kgrid
-        shape = self.data_shape
-
         if R not in self.data_smooth_f:
             self.smooth(R)
 
         data_f = self.data_smooth_f[R]
-        indices = np.zeros((ndim, ndim), dtype=int)
+        ndim = self.ndim
+        kgrid = self.kgrid
         ihess = 0
+        indices = np.zeros((ndim, ndim), dtype=int)
 
         logger.debug('Computing hessian and gradient in Fourier space.')
         # Compute hessian and gradient in Fourier space
@@ -303,6 +306,24 @@ class ExtremaFinder(object):
         # Get them back in real space
         self.grad[...] = fft.irfftn(self.grad_f, axes=range(1, ndim+1))
         self.hess[...] = fft.irfftn(self.hess_f, axes=range(1, ndim+1))
+
+        return indices
+
+    def find_extrema(self, R):
+        """Find the extrema of the field smoothed at scale R (in pixel unit).
+
+        Return
+        ------
+        data: CriticalPoints
+              The set of critical points found.
+        """
+        ndim = self.ndim
+        shape = self.data_shape
+
+        if R not in self.data_smooth_f:
+            self.smooth(R)
+
+        indices = self.compute_derivatives(R)
 
         rhs = -self.grad
         lhs = self.hess[indices.flatten(), ...].reshape(ndim, ndim, *shape)
