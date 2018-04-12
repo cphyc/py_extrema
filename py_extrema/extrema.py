@@ -194,9 +194,10 @@ class ExtremaFinder(object):
         (twice the info of a real), so the shape is half the input
         size.
         """
+        twopi = 2*np.pi
         shape = self.data_shape
-        kall = ([np.fft.fftfreq(_) for _ in shape[:-1]] +
-                [np.fft.rfftfreq(_) for _ in shape[-1:]])
+        kall = ([np.fft.fftfreq(_)*twopi for _ in shape[:-1]] +
+                [np.fft.rfftfreq(_)*twopi for _ in shape[-1:]])
         self.kgrid = np.asarray(np.meshgrid(*kall, indexing='ij'))
         self.k2 = (self.kgrid**2).sum(axis=0)
 
@@ -238,10 +239,10 @@ class ExtremaFinder(object):
         logger.debug('Computing hessian and gradient in Fourier space.')
         # Compute hessian and gradient in Fourier space
         for idim in range(ndim):
-            self.grad_f[idim, ...] = data_f * (1j) * kgrid[idim] * (2*np.pi)
+            self.grad_f[idim, ...] = data_f * (1j) * kgrid[idim]
             for idim2 in range(idim, ndim):
                 self.hess_f[ihess, ...] = (
-                    self.grad_f[idim, ...] * (1j) * kgrid[idim2]) * (2*np.pi)
+                    self.grad_f[idim, ...] * (1j) * kgrid[idim2])
 
                 indices[idim, idim2] = indices[idim2, idim] = ihess
                 ihess += 1
