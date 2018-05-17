@@ -1,9 +1,6 @@
 import numpy as np
-try:
-    from pyfftw.interfaces import numpy_fft as fft
-except ImportError:
-    print('Could not load pyfftw, falling back to numpy.')
-    fft = np.fft
+from pyfftw.interfaces import numpy_fft as fft
+
 from numba import jit
 import logging
 from scipy.spatial import cKDTree as KDTree
@@ -18,7 +15,7 @@ handler.setFormatter(formatter)
 handler.setLevel(logging.DEBUG)
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.ERROR)
 
 # Add handler to logger
 logger.addHandler(handler)
@@ -88,19 +85,23 @@ def _cleanup_pairs_KDTree(xyz, kind, pairs, N, shape):
             d1 = distance2(xyz[i], ijk1, N)
             d2 = distance2(xyz[j], ijk2, N)
 
+            # Keep point closest to cell center
             if d1 > d2:
                 xyz[i, :] = -1
                 skip[i] = 1
             else:
-                skip[j] = 1
                 xyz[j, :] = -1
+                skip[j] = 1
 
 
 def cleanup_pairs_KDTree(xyz, kind, data_shape, dmin):
     npoint, ndim = xyz.shape
     N = data_shape[0]
     logger.debug('Building KDTree')
-    tree = KDTree(xyz)
+    # TODO: support non square domains
+    if not np.all(np.asarray(data_shape) == data_shape[0]):
+        raise Exception('All axis should have the same dimension.')
+    tree = KDTree(xyz, boxsize=data_shape[0])
 
     pairs = list(tree.query_pairs(dmin))
     logger.debug('Removing close pairs')
@@ -182,10 +183,20 @@ class ExtremaFinder(object):
 
     dmin = 1  # Minimum distance between 2 points to merge them
 
-    def __init__(self, data, cache_len=10, clean_pairs_method='KDTree'):
+    FFT_args = None
+
+    def __init__(self, data, cache_len=10, clean_pairs_method='KDTree',
+                 nthreads=1, loglevel=None):
+
+        if loglevel:
+            logger.setLevel(loglevel)
+
         self.ndim = data.ndim
         ndim = self.ndim
+        self.nthreads = nthreads
         self.clean_pairs_method = clean_pairs_method
+
+        self.FFT_args = dict(threads=nthreads)
 
         self.data_raw = data
         self.data_shape = data.shape
@@ -205,6 +216,7 @@ class ExtremaFinder(object):
                              dtype=self.data_raw.dtype)
         self.hess = np.zeros([ndim*(ndim+1)//2] + shape,
                              dtype=self.data_raw.dtype)
+        self.curvature = np.zeros(shape, dtype=self.data_raw.dtype)
 
         self.grad_f = np.zeros([ndim] + shape_f,
                                dtype=self.data_raw_f.dtype)
@@ -234,9 +246,12 @@ class ExtremaFinder(object):
 
     def fft_forward(self):
         """Compute the direct Fourier transform of the input data."""
-        logger.debug('Computing FFT of input')
+        logger.debug('Computing FFT of input with %s threads', self.nthreads)
         data = self.data_raw
-        self.data_raw_f = fft.rfftn(data)
+
+        # Note: we don't use the defaults argument for the FFT as we
+        # don't want any planning effort going to this one
+        self.data_raw_f = fft.rfftn(data, threads=self.nthreads)
 
     def smooth(self, R):
         """Smooth the data at scale R (in pixel unit)."""
@@ -246,12 +261,13 @@ class ExtremaFinder(object):
         logger.debug('Smoothing at scale %.3f', R)
         data_f = self.data_raw_f * np.exp(-self.k2 * R**2 / 2)
         self.data_smooth_f[R] = data_f
-        self.data_smooth[R] = fft.irfftn(data_f)
+        self.data_smooth[R] = fft.irfftn(data_f, **self.FFT_args)
         return self.data_smooth[R]
 
     def clean_pairs(self, xyz0, kind0):
         if self.clean_pairs_method == 'KDTree':
-            cleanup_pairs_KDTree(xyz0, kind0, self.data_raw.shape, self.dmin)
+            cleanup_pairs_KDTree(np.mod(xyz0, self.data_raw.shape),
+                                 kind0, self.data_raw.shape, self.dmin)
             mask = np.any(xyz0 != -1, axis=1)
 
         elif self.clean_pairs_method == 'direct':
@@ -304,8 +320,9 @@ class ExtremaFinder(object):
 
         logger.debug('Inverse FFT of gradient and hessian')
         # Get them back in real space
-        self.grad[...] = fft.irfftn(self.grad_f, axes=range(1, ndim+1))
-        self.hess[...] = fft.irfftn(self.hess_f, axes=range(1, ndim+1))
+        self.grad[...] = fft.irfftn(self.grad_f, axes=range(1, ndim+1), **self.FFT_args)
+        self.hess[...] = fft.irfftn(self.hess_f, axes=range(1, ndim+1), **self.FFT_args)
+        self.curvature[...] = np.linalg.det(self.hess[indices, ...].T).T
 
         return indices
 
