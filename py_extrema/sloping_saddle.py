@@ -5,6 +5,7 @@ from tqdm import tqdm
 import pandas as pd
 from .extrema import logger
 
+
 class SlopingSaddle(object):
     """A class to detect sloping saddle point by successive smoothing."""
 
@@ -57,27 +58,33 @@ class SlopingSaddle(object):
         ss_points = []
         for iR, R in enumerate(tqdm(self.Rgrid[:-1],
                                     desc='Finding s. saddle')):
+            dR = self.Rgrid[iR+1] - R
             for kind in range(ndim):
                 t1 = trees[kind][iR]
 
                 # Compute smallest distance
                 tnext = trees[kind][iR + 1]
                 dnext, inext = tnext.query(t1.data,
-                                           distance_upper_bound=2*R)
+                                           distance_upper_bound=2*dR)
 
                 tother = trees[kind+1][iR]
                 dother, iother = tother.query(t1.data,
                                               distance_upper_bound=2*R)
 
-                mask = dother < dnext
+                # Check :
+                # * there is no crit. pt. of same kind within a few dR
+                # * there is a crit. pt. at same scale of next kind
+                #   (e.g. saddle point-peak)
+                mask = (dother < dnext) & np.isinf(dnext)
 
-                logger.debug('Slopping saddle rate %s: %.2f%%' % (kind, mask.sum() / mask.shape[0] * 100))
+                logger.debug('Slopping saddle rate %s: %.2f%%' %
+                             (kind, mask.sum() / mask.shape[0] * 100))
 
                 # Compute position
                 new_ss_pos = self.compute_middle(t1.data[mask],
                                                  tother.data[iother[mask]])
                 for nssp in new_ss_pos:
-                    ss_points.append((int(kind), iR, *nssp))
+                    ss_points.append((int(kind), iR+1, *nssp))
 
         names = ['kind', 'iR']
         for e in 'xyz'[:ndim]:
