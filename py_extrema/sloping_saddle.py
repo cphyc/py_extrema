@@ -1,7 +1,7 @@
 from scipy.spatial import cKDTree as KDTree
 from py_extrema.extrema import ExtremaFinder
 import numpy as np
-from tqdm import tqdm
+from tqdm.autonotebook import tqdm
 import pandas as pd
 from .extrema import logger
 
@@ -60,6 +60,13 @@ class SlopingSaddle(object):
                                     desc='Finding s. saddle')):
             dR = self.Rgrid[iR+1] - R
             for kind in range(ndim):
+                # Here we compare the distance from the current critical points
+                # to points at the next smoothing scale and next kind
+                # of critical points. There are two possibilities:
+                # 1. there is one critical point at the next smoothing scale:
+                #    the critical point subsists
+                # 2. there is one critical point _of another kind_ at
+                #    the current scale: the critical point disappears
                 t1 = trees[kind][iR]
 
                 # Compute smallest distance
@@ -84,44 +91,12 @@ class SlopingSaddle(object):
                 new_ss_pos = self.compute_middle(t1.data[mask],
                                                  tother.data[iother[mask]])
                 for nssp in new_ss_pos:
-                    ss_points.append((int(kind), iR+1, *nssp))
+                    ss_points.append((int(kind), iR+1, R, *nssp))
 
-        names = ['kind', 'iR']
+        names = ['kind', 'iR', 'R']
         for e in 'xyz'[:ndim]:
             names.append(e)
 
         self.slopping_saddle = pd.DataFrame(ss_points,
                                             columns=names)
         return self.slopping_saddle
-
-    # def detect_extrema(self):
-    #     trees = {}
-    #     for i in range(4):
-    #         trees[i] = []
-    #     extrema = []
-    #     for R in self.Rgrid:
-    #         ext = self.ef.find_extrema(R)
-    #         extrema.append(ext)
-    #         for i in range(4):
-    #             mask = ext['kind'] == i
-    #             trees[i].append(KDTree(ext['pos'][mask], boxsize=1))
-
-    #     # Now find matching points
-    #     for i, R in range(len(self.Rgrid)-1):
-    #         R0 = self.Rgrid[i]
-    #         R1 = self.Rgrid[i+1]
-    #         dR = R1 - R0
-    #         e1 = extrema[i+1]
-
-    #         for i in range(4):
-    #             mask = e1['kind'] == i
-    #             t0 = trees[i]
-
-    #             # Find in tree critical points at smoother level
-    #             _, indexes = t0.query(e1['pos'][mask], distance_upper_bound=dR)
-
-    #             mask = indexes < t0.n
-
-    #             # TODO:
-    #             # * save in tree form the children/father relations
-    #             # * use the tree to detect merging critical points

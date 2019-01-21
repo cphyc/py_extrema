@@ -172,6 +172,7 @@ class ExtremaFinder(object):
     ndim = None  # Number of dimensions
     data_smooth = None    # Cache containing the real-space smoothed fields
     data_smooth_f = None  # Cache containing the Fourier-space smoothed fields
+    extrema = None        # Dictionary containing the extrema
     data_raw = None    # Real-space raw data
     data_raw_f = None  # Fourier-space raw data
 
@@ -204,6 +205,7 @@ class ExtremaFinder(object):
         # Initialize caches
         self.data_smooth = FiniteDictionary(cache_len)
         self.data_smooth_f = FiniteDictionary(cache_len)
+        self.extrema = {}
 
         # Perform first FFT + prepare k grid
         self.build_kgrid()
@@ -334,6 +336,8 @@ class ExtremaFinder(object):
         data: CriticalPoints
               The set of critical points found.
         """
+        if R in self.extrema:
+            return self.extrema[R]
         ndim = self.ndim
         shape = self.data_shape
 
@@ -383,4 +387,5 @@ class ExtremaFinder(object):
             npt=mask.sum()
         )
 
+        self.extrema[R] = data
         return data
