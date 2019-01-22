@@ -6,8 +6,8 @@ import pandas as pd
 from .extrema import logger
 
 
-class SlopingSaddle(object):
-    """A class to detect sloping saddle point by successive smoothing."""
+class SloppingSaddle(object):
+    """A class to detect slopping saddle point by successive smoothing."""
 
     def __init__(self, extrema_finder, Rgrid):
         if not issubclass(type(extrema_finder), ExtremaFinder):
@@ -53,7 +53,7 @@ class SlopingSaddle(object):
         ndim = self.ef.ndim
         trees = self.trees
 
-        # Compute cross tree distances. Sloping saddle are found where
+        # Compute cross tree distances. Slopping saddle are found where
         # the closest point is of different kind.
         ss_points = []
         for iR, R in enumerate(tqdm(self.Rgrid[:-1],
