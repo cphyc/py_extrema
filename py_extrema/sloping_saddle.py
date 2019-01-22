@@ -82,7 +82,7 @@ class SlopingSaddle(object):
                 # * there is no crit. pt. of same kind within a few dR
                 # * there is a crit. pt. at same scale of next kind
                 #   (e.g. saddle point-peak)
-                mask = (dother < dnext) & np.isinf(dnext)
+                mask = (dother < dnext) & np.isfinite(dnext)
 
                 logger.debug('Slopping saddle rate %s: %.2f%%' %
                              (kind, mask.sum() / mask.shape[0] * 100))
