@@ -24,7 +24,8 @@ setup(
     packages=find_packages(exclude=('tests', 'docs')),
     install_requires=[
         'numpy',
-        'numba'
+        'numba',
+        'unyt'
     ],
     include_package_data=True
 )
