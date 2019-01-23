@@ -1,6 +1,11 @@
 import numpy as np
 from pyfftw.interfaces import numpy_fft as fft
 
+from unyt import UnitRegistry
+import unyt as U
+from unyt import unyt_array, unyt_quantity
+from unyt.dimensions import length
+
 from numba import jit
 import logging
 from scipy.spatial import cKDTree as KDTree
@@ -58,6 +63,7 @@ def copy_xyz(xyz_rela):
 
     return xyz.T, mask
 
+
 @jit
 def distance2(a, b, N):
     """Compute the distance between two vectors with wrapping of size N."""
@@ -65,33 +71,32 @@ def distance2(a, b, N):
     for i in range(a.shape[0]):
         aa = a[i]
         bb = b[i]
-        if aa - bb < -N/2:
-            d2 += (aa - bb + N)**2
-        elif aa - bb > N/2:
-            d2 += (aa - bb - N)**2
+        dx = aa - bb
+        if dx < -N/2:
+            d2 += (dx + N)**2
+        elif dx > N/2:
+            d2 += (dx - N)**2
         else:
-            d2 += (aa - bb)**2
+            d2 += (dx)**2
     return d2
 
 
 @jit(nopython=True)
-def _cleanup_pairs_KDTree(xyz, kind, pairs, N, shape):
-    skip = np.zeros_like(kind, dtype=np.int8)
+def _cleanup_pairs_KDTree(xyz, xc, kind, pairs, N, shape):
+    skip = np.zeros(len(xyz), dtype=np.uint8)
     for i, j in pairs:
-        if kind[i] == kind[j] and skip[i] != 1 and skip[j] != 1:
-            ijk1 = unravel_index(i, shape)
-            ijk2 = unravel_index(j, shape)
+        if not skip[i] and not skip[j] and kind[i] == kind[j]:
+            # Keep point closest to center of cell
+            _xc = xc[i]
+            di = np.sum((xyz[i] - _xc)**2)
+            dj = np.sum((xyz[j] - _xc)**2)
 
-            d1 = distance2(xyz[i], ijk1, N)
-            d2 = distance2(xyz[j], ijk2, N)
-
-            # Keep point closest to cell center
-            if d1 > d2:
-                xyz[i, :] = -1
-                skip[i] = 1
+            if di > dj:
+                skip[i] = True
             else:
-                xyz[j, :] = -1
-                skip[j] = 1
+                skip[j] = True
+
+    return skip
 
 
 def cleanup_pairs_KDTree(xyz, kind, data_shape, dmin):
@@ -101,11 +106,12 @@ def cleanup_pairs_KDTree(xyz, kind, data_shape, dmin):
     # TODO: support non square domains
     if not np.all(np.asarray(data_shape) == data_shape[0]):
         raise Exception('All axis should have the same dimension.')
-    tree = KDTree(xyz, boxsize=data_shape[0])
-
-    pairs = list(tree.query_pairs(dmin))
+    tree = KDTree(xyz, boxsize=data_shape[0], copy_data=True)
+    pairs = list(tree.query_pairs(dmin, p=np.inf))
     logger.debug('Removing close pairs')
-    _cleanup_pairs_KDTree(xyz, kind, pairs, N, data_shape)
+    xc = np.round(xyz + 0.5) - 0.5
+    skip = _cleanup_pairs_KDTree(xyz, xc, kind, pairs, N, data_shape).astype(bool)
+    return ~skip
 
 
 @jit(nopython=True)
@@ -169,7 +175,8 @@ def cleanup_pairs_N2(xyz, kind, data_shape):
 class ExtremaFinder(object):
     """A class to smooth an extract extrema from a n-dimensional field."""
 
-    ndim = None  # Number of dimensions
+    ndim = None    # Number of dimensions
+    boxlen = None  # Size of the box in physical units
     data_smooth = None    # Cache containing the real-space smoothed fields
     data_smooth_f = None  # Cache containing the Fourier-space smoothed fields
     extrema = None        # Dictionary containing the extrema
@@ -187,12 +194,17 @@ class ExtremaFinder(object):
     FFT_args = None
 
     def __init__(self, data, cache_len=10, clean_pairs_method='KDTree',
-                 nthreads=1, loglevel=None):
+                 nthreads=1, loglevel=None, boxlen=1):
+
+        self.registry = reg = UnitRegistry()
+        reg.add("pixel", base_value=float((U.Mpc * boxlen / data.shape[0]).to('m')),
+                dimensions=length)
 
         if loglevel:
             logger.setLevel(loglevel)
 
         self.ndim = data.ndim
+        self.boxlen = boxlen
         ndim = self.ndim
         self.nthreads = nthreads
         self.clean_pairs_method = clean_pairs_method
@@ -224,6 +236,12 @@ class ExtremaFinder(object):
                                dtype=self.data_raw_f.dtype)
         self.hess_f = np.zeros([ndim*(ndim+1)//2] + shape_f,
                                dtype=self.data_raw_f.dtype)
+
+    def array(self, value, units):
+        return unyt_array(value, units, registry=self.registry)
+
+    def quantity(self, value, units):
+        return unyt_quantity(value, units, registry=self.registry)
 
     def build_kgrid(self):
         """Build the grid of k coefficients.
@@ -257,6 +275,8 @@ class ExtremaFinder(object):
 
     def smooth(self, R):
         """Smooth the data at scale R (in pixel unit)."""
+        if isinstance(R, unyt_quantity):
+            R = float(R.to('pixel'))
         if R in self.data_smooth:
             return self.data_smooth[R]
 
@@ -268,9 +288,10 @@ class ExtremaFinder(object):
 
     def clean_pairs(self, xyz0, kind0):
         if self.clean_pairs_method == 'KDTree':
-            cleanup_pairs_KDTree(np.mod(xyz0, self.data_raw.shape),
-                                 kind0, self.data_raw.shape, self.dmin)
-            mask = np.any(xyz0 != -1, axis=1)
+            boxlen = self.data_raw.shape
+            mask = cleanup_pairs_KDTree(
+                np.mod(xyz0, boxlen),
+                kind0, self.data_raw.shape, self.dmin)
 
         elif self.clean_pairs_method == 'direct':
             cleanup_pairs_N2(xyz0, kind0, self.data_raw.shape)
@@ -336,6 +357,8 @@ class ExtremaFinder(object):
         data: CriticalPoints
               The set of critical points found.
         """
+        if isinstance(R, unyt_quantity):
+            R = float(R.to('pixel'))
         if R in self.extrema:
             return self.extrema[R]
         ndim = self.ndim
@@ -379,11 +402,17 @@ class ExtremaFinder(object):
         # Remove duplicate points
         mask = self.clean_pairs(xyz0, kind0)
 
-        xyz = xyz0[mask]
+        # Add units
+        pos = self.array(xyz0[mask], 'pixel')
+        hess = self.array(hess0[mask], '1/pixel**2')
+        eigvals = self.array(eigvals0[mask], '1/pixel**2')
 
+        # Convert to physical units
         data = CriticalPoints(
-            pos=xyz, eigvals=eigvals0[mask, ...],
-            kind=kind0[mask], hessian=hess0[mask, ...],
+            pos=pos,
+            eigvals=eigvals,
+            kind=kind0[mask],
+            hessian=hess,
             npt=mask.sum()
         )
 
