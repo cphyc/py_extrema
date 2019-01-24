@@ -9,7 +9,7 @@ from unyt.dimensions import length
 from numba import jit
 import logging
 from scipy.spatial import cKDTree as KDTree
-from .utils import FiniteDictionary, CriticalPoints, unravel_index
+from .utils import FiniteDictionary, CriticalPoints, unravel_index, solve
 
 # create a logging format
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')

@@ -1,5 +1,7 @@
-from py_extrema.utils import FiniteDictionary, unravel_index
+from py_extrema.utils import FiniteDictionary, unravel_index, solve
 import numpy as np
+
+from numpy.testing import assert_allclose
 
 
 def testFiniteDictionary():
@@ -40,4 +42,25 @@ def testUnravelIndex():
 
         print(expected, got)
 
-        assert np.all(expected == got)
+        assert_allclose(expected, got)
+
+
+def testSolve2D():
+    A0 = np.random.rand(8, 9, 10, 2, 2)
+    A = (A0 + A0.swapaxes(-2, -1)) / 2  # Build symmetric matrix
+    
+    B = np.random.rand(8, 9, 10, 2)
+
+    x1 = solve(A, B)
+    x2 = np.linalg.solve(A, B)
+    assert_allclose(x1, x2)
+
+def testSolve3D():
+    A0 = np.random.rand(8, 9, 10, 3, 3)
+    A = (A0 + A0.swapaxes(-2, -1)) / 2  # Build symmetric matrix
+    
+    B = np.random.rand(8, 9, 10, 3)
+
+    x1 = solve(A, B)
+    x2 = np.linalg.solve(A, B)
+    assert_allclose(x1, x2)

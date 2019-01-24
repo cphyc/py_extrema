@@ -7,6 +7,7 @@ from .extrema import logger
 
 from unyt import unyt_array
 
+
 class SloppingSaddle(object):
     """A class to detect slopping saddle point by successive smoothing."""
 
@@ -15,9 +16,9 @@ class SloppingSaddle(object):
             raise Exception('Passed argument is not of type extrema finder.')
 
         self.ef = extrema_finder
-        if not isinstance(Rgrid, unyt_array):
-            Rgrid = extrema_finder.array(Rgrid, 'Mpc')
 
+        if not isinstance(Rgrid, unyt_array):
+            Rgrid = self.ef.array(Rgrid, 'Mpc')
         self.Rgrid = Rgrid
 
     def compute_middle(self, x, y):
@@ -106,14 +107,16 @@ class SloppingSaddle(object):
                     (kind, mask_both.sum() / mask_both.shape[0] * 100))
 
                 # Compute position -- prev
-                new_ss_pos = self.compute_middle(t.data[mask_prev],
-                                                 tprev.data[iprev[mask_prev]])
+                new_ss_pos = self.compute_middle(
+                    t.data[mask_prev],
+                    tprev.data[iprev[mask_prev]])
                 for pos in new_ss_pos:
                     ss_points.append((kind-1, iR+1, R, *pos))
 
                 # Compute position -- next
-                new_ss_pos = self.compute_middle(t.data[mask_next],
-                                                 tnext.data[inext[mask_next]])
+                new_ss_pos = self.compute_middle(
+                    t.data[mask_next],
+                    tnext.data[inext[mask_next]])
                 for pos in new_ss_pos:
                     ss_points.append((kind, iR+1, R, *pos))
 
