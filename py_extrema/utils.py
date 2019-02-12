@@ -263,37 +263,37 @@ def measure_hessian(position, data):
     N = data.shape[0]
 
     buff = np.empty((4, 4, 4))
-    hess_buff = np.empty((6, 2, 2, 2))
-    tmp_buff = np.empty((3, 3, 3))
-    tmp = np.empty(3)
+    hess_buff = np.empty((2, 2, 2))
+    tmp_buff = np.empty((4, 4, 4))
+    # tmp = np.empty(3)
     ret = np.empty((Npt, 3, 3))
 
     ipos = np.empty(3, dtype=np.int32)
     jpos = np.empty(3, dtype=np.int32)
-    dpos = np.empty(3, dtype=position.dtype)
+    dpos = np.empty(3, dtype=np.float64)
 
     for ipt in range(Npt):
         pos = position[ipt]
 
         ipos[:] = pos-1
         jpos[:] = ipos+4
-        dpos[:] = pos - ipos + 1
+        dpos[:] = pos - ipos - 1
 
         # Copy data with periodic boundaries
-        for i in range(ipos[0], jpos[0]):
-            for j in range(ipos[1], jpos[1]):
-                for k in range(ipos[2], jpos[2]):
-                    buff[i, j] = data[i % N, j % N, k % N]
+        for i0, i in enumerate(range(ipos[0], jpos[0])):
+            for j0, j in enumerate(range(ipos[1], jpos[1])):
+                for k0, k in enumerate(range(ipos[2], jpos[2])):
+                    buff[i0, j0, k0] = data[i % N, j % N, k % N]
 
         # Compute gradient using finite difference
-        ii = 0
-
         for idim in range(3):
             for jdim in range(idim, 3):
                 tmp_buff[:] = gradient(gradient(buff, axis=idim), axis=jdim)
-                hess_buff[ii, :, :, :] = tmp_buff[1:3, 1:3, 1:3]
+                hess_buff[:, :, :] = tmp_buff[1:3, 1:3, 1:3]
 
-                tmp[:] = trilinear_interpolation(dpos, hess_buff)[0]
+                tmp = trilinear_interpolation(dpos, hess_buff)
+
                 ret[ipt, idim, jdim] = tmp
                 ret[ipt, jdim, idim] = tmp
+
     return ret
