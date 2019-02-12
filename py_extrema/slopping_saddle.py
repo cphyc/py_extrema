@@ -3,10 +3,12 @@ from py_extrema.extrema import ExtremaFinder
 import numpy as np
 from tqdm.autonotebook import tqdm
 import pandas as pd
+from unyt import unyt_array
+from collections import namedtuple
+
 from .extrema import logger
 
-from unyt import unyt_array
-
+ExtrData = namedtuple('ExtremaData', ['tree', 'data'])
 
 class SloppingSaddle(object):
     """A class to detect slopping saddle point by successive smoothing."""
@@ -45,12 +47,14 @@ class SloppingSaddle(object):
             } for kind in range(ndim+1)}
 
         for iR, R in enumerate(tqdm(Rgrid, desc='Building trees')):
-            ext = self.ef.find_extrema(R)
+            ext = self.ef.find_extrema(R).as_dataframe()
             for k in range(ndim+1):
                 mask = (ext.kind == k)
-                pos = ext.pos[mask].to('pixel').value
-                trees[k][iR] = KDTree(np.mod(pos, boxsize),
-                                      boxsize=boxsize)
+                pos = ext.loc[mask, ['x', 'y', 'z']].values
+                trees[k][iR] = ExtrData(
+                    tree=KDTree(np.mod(pos, boxsize),
+                                boxsize=boxsize),
+                    data=ext.loc[mask])
 
         self._trees = trees
         return self._trees
@@ -74,22 +78,22 @@ class SloppingSaddle(object):
                 #    the critical point subsists
                 # 2. there is one critical point _of another kind_ at
                 #    the current scale: the critical point disappears
-                t = trees[kind][iR]
+                t = trees[kind][iR].tree
 
                 # Compute smallest distance to same kind at next
                 # smoothing scale
-                tnextR = trees[kind][iR + 1]
+                tnextR = trees[kind][iR + 1].tree
                 dnextR, inextR = tnextR.query(
                     t.data, distance_upper_bound=2*R)
 
                 # Compute distance to other critical points
                 # previous kind
-                tprev = trees[kind - 1][iR]
+                tprev = trees[kind - 1][iR].tree
                 dprev, iprev = tprev.query(t.data,
                                            distance_upper_bound=2*R)
 
                 # next kind
-                tnext = trees[kind + 1][iR]
+                tnext = trees[kind + 1][iR].tree
                 dnext, inext = tnext.query(t.data,
                                            distance_upper_bound=2*R)
 
@@ -97,8 +101,10 @@ class SloppingSaddle(object):
                 # * there is no crit. pt. of same kind within a few dR
                 # * there is a crit. pt. at same scale of next kind
                 #   (e.g. saddle point-peak)
-                mask_prev = (dprev < dnextR) & (dprev < dnext) & np.isfinite(dprev)
-                mask_next = (dnext < dnextR) & (dnext < dprev) & np.isfinite(dnext)
+                mask_prev = (dprev < dnextR) & (dprev < dnext) \
+                  & np.isfinite(dprev)
+                mask_next = (dnext < dnextR) & (dnext < dprev) \
+                  & np.isfinite(dnext)
 
                 mask_both = mask_prev | mask_next
 
@@ -110,17 +116,38 @@ class SloppingSaddle(object):
                 new_ss_pos = self.compute_middle(
                     t.data[mask_prev],
                     tprev.data[iprev[mask_prev]])
-                for pos in new_ss_pos:
-                    ss_points.append((kind-1, iR+1, R, *pos))
+
+                # Compute data
+                keys = ['l1', 'l2', 'l3', 'h11', 'h22', 'h33', 'h12', 'h13', 'h23', 'dens']
+                A = trees[kind][iR].data.loc[mask_prev][keys]
+                B = trees[kind-1][iR].data.iloc[iprev[mask_prev]][keys]
+
+                datacur = A.values
+                dataprev = B.values
+
+                new_data = (datacur + dataprev) / 2
+
+                for ii, pos in enumerate(new_ss_pos):
+                    ss_points.append((kind-1, iR+1, R, *new_data[ii, :], *pos))
 
                 # Compute position -- next
                 new_ss_pos = self.compute_middle(
                     t.data[mask_next],
                     tnext.data[inext[mask_next]])
-                for pos in new_ss_pos:
-                    ss_points.append((kind, iR+1, R, *pos))
 
-        names = ['kind', 'iR', 'R']
+                # Compute data
+                A = trees[kind][iR].data.loc[mask_next][keys]
+                B = trees[kind + 1][iR].data.iloc[inext[mask_next]][keys]
+
+                datacur = A.values
+                dataprev = B.values
+
+                new_data = (datacur + dataprev) / 2
+
+                for ii, pos in enumerate(new_ss_pos):
+                    ss_points.append((kind, iR+1, R, *new_data[ii, :], *pos))
+
+        names = ['kind', 'iR', 'R'] + keys
         for e in 'xyz'[:ndim]:
             names.append(e)
 

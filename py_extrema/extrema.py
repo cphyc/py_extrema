@@ -382,6 +382,9 @@ class ExtremaFinder(object):
         xyz0, mask0 = copy_xyz(xyz_rel)
         mask0 = (mask0 == 1)
 
+        # shape (npoint)
+        dens0 = self.smooth(R).flatten()[mask0]
+
         # shape (npoint, ndim, ndim)
         hess0 = (self.hess.reshape(ndim*(ndim+1)//2, -1)
                  [:, mask0]
@@ -406,6 +409,7 @@ class ExtremaFinder(object):
         pos = self.array(xyz0[mask], 'pixel')
         hess = self.array(hess0[mask], '1/pixel**2')
         eigvals = self.array(eigvals0[mask], '1/pixel**2')
+        dens = self.array(dens0[mask], 'pixel')
 
         # Convert to physical units
         data = CriticalPoints(
@@ -413,7 +417,8 @@ class ExtremaFinder(object):
             eigvals=eigvals,
             kind=kind0[mask],
             hessian=hess,
-            npt=mask.sum()
+            npt=mask.sum(),
+            dens=dens
         )
 
         self.extrema[R] = data

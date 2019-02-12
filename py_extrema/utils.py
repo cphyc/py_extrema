@@ -1,6 +1,8 @@
 from numba import njit, guvectorize
 from collections import namedtuple, OrderedDict
 import numpy as np
+import attr
+import pandas as pd
 
 
 class FiniteDictionary(OrderedDict):
@@ -29,8 +31,28 @@ class FiniteDictionary(OrderedDict):
         return self[list(self.keys())[-1]]
 
 
-CriticalPoints = namedtuple('CriticalPoints',
-                            ['pos', 'eigvals', 'kind', 'hessian', 'npt'])
+@attr.s(frozen=True)
+class CriticalPoints:
+    pos = attr.ib(converter=np.atleast_2d)
+    eigvals = attr.ib(converter=np.atleast_2d)
+    kind = attr.ib(converter=np.atleast_1d)
+    hessian = attr.ib(converter=np.atleast_3d)
+    npt = attr.ib(converter=int)
+    dens = attr.ib(converter=np.atleast_1d)
+
+    def as_dataframe(self):
+        x, y, z = self.pos.T
+        l1, l2, l3 = self.eigvals.T
+        h11, h22, h33, h12, h13, h23 = (
+            self.hessian[:, i, j]
+            for i, j in ((0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)))
+
+        return pd.DataFrame(dict(
+            x=x, y=y, z=z,
+            l1=l1, l2=l2, l3=l3,
+            kind=self.kind,
+            h11=h11, h22=h22, h33=h33, h12=h12, h13=h13, h23=h23,
+            dens=self.dens))
 
 
 @njit
