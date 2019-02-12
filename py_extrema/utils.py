@@ -1,4 +1,4 @@
-from numba import njit
+from numba import njit, guvectorize
 from collections import OrderedDict
 import numpy as np
 import numexpr as ne
@@ -116,15 +116,28 @@ def solve(A, B):
         return np.linalg.solve(A, B)
 
 
-@njit
-def trilinear_interpolation(pos, v):
+@guvectorize(['void(float64[:], float64[:,:,:], float64[:])'],
+             '(Ndim),(i,i,i)->()')
+def trilinear_interpolation(pos, v, ret):
     '''Compute the trilinear interpolation of data at given position
 
     Arguments
     ---------
-    pos : 1d array
-       The position
-    v : (2, 2, 2) array
+    pos : (Ndim, ) float array
+       The position w.r.t to the lower left edget of the cube.
+    v : (M, 2, 2, 2) float array
+       The value at the edges.
+
+    Returns
+    -------
+    interp : float
+       The interpolated value.
+
+    Notes
+    -----
+    The original code is from
+    http://paulbourke.net/miscellaneous/interpolation/
+
     '''
     xl, yl, zl = pos
     xr, yr, zr = 1-pos
@@ -134,14 +147,11 @@ def trilinear_interpolation(pos, v):
     y = (yr, yl)
     z = (zr, zl)
 
-    ret = np.zeros(len(v))
     for i in range(2):
         for j in range(2):
             for k in range(2):
                 vol = x[i] * y[j] * z[k]
-                ret += v[..., i, j, k] * vol
-
-    return ret
+                ret[...] += v[..., i, j, k] * vol
 
 
 @njit
@@ -283,8 +293,6 @@ def measure_hessian(position, data):
                 tmp_buff[:] = gradient(gradient(buff, axis=idim), axis=jdim)
                 hess_buff[ii, :, :, :] = tmp_buff[1:3, 1:3, 1:3]
 
-                # Linear interpolation (from
-                # http://paulbourke.net/miscellaneous/interpolation/)
                 tmp[:] = trilinear_interpolation(dpos, hess_buff)[0]
                 ret[ipt, idim, jdim] = tmp
                 ret[ipt, jdim, idim] = tmp
