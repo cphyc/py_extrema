@@ -49,7 +49,7 @@ def testUnravelIndex():
 def testSolve2D():
     A0 = np.random.rand(8, 9, 10, 2, 2)
     A = (A0 + A0.swapaxes(-2, -1)) / 2  # Build symmetric matrix
-    
+
     B = np.random.rand(8, 9, 10, 2)
 
     x1 = solve(A, B)
@@ -59,7 +59,7 @@ def testSolve2D():
 def testSolve3D():
     A0 = np.random.rand(8, 9, 10, 3, 3)
     A = (A0 + A0.swapaxes(-2, -1)) / 2  # Build symmetric matrix
-    
+
     B = np.random.rand(8, 9, 10, 3)
 
     x1 = solve(A, B)
@@ -86,21 +86,57 @@ def test_trilinear_interpolation():
 
     ref = []
     new = []
-    for pos in np.random.rand(10000, 3):
-        ref.append(interp(pos))
-        new.append(trilinear_interpolation(pos, data))
+    pos = np.random.rand(10_000, 3)
+    ref = interp(pos)
+    new = trilinear_interpolation(pos, data)[:, 0]
 
     assert_allclose(ref, new)
+
+def test_trilinear_interpolation_2():
+    data = np.random.rand(1, 2, 2, 2)
+
+    vleft = data[0, 0, 0, 0]
+    vright = data[0, 1, 0, 0]
+
+    x = np.linspace(0, 1)
+    z = np.zeros_like(x)
+    X = np.array([x, z, z]).T
+
+    ref = x * (vright-vleft) + vleft
+    exp = trilinear_interpolation(X, data)[:, 0]
+
+    assert_allclose(ref, exp)
 
 
 def test_measure_hessian():
     np.random.seed(16091992)
-    data = np.random.rand(10, 10, 10)
+    x, y, z = np.meshgrid(*[np.arange(-5, 6)]*3, indexing='ij')
+    data = x**2 + y**2 + z**2 + x*y + y*z + x*z
+
+    def anal_hess(x, y, z):
+        tmp = np.array(
+            [[2, 1, 1],
+             [1, 2, 1],
+             [1, 1, 2]]) * 1.0
+        return tmp
 
     hess = np.array(np.gradient(np.gradient(data, axis=(-3, -2, -1)),
                                 axis=(-3, -2, -1)))
 
-    ref = hess[..., 5, 5, 5]
-    new = measure_hessian(np.array([5, 5, 5]), data)
+    ref = []
+    exp = []
 
-    assert_allclose(ref, new)
+    all_pos = []
+    for i in range(2, 8):
+        for j in range(2, 8):
+            for k in range(2, 8):
+                all_pos.append([i, j, k])
+                X = np.array([i-5., j-5., k-5.])
+                ref.append(
+                    anal_hess(*X)
+                )
+
+    X = np.array(all_pos, dtype=np.float64)
+    exp = measure_hessian(X, data)
+
+    assert_allclose(ref, exp)

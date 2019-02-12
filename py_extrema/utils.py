@@ -116,8 +116,8 @@ def solve(A, B):
         return np.linalg.solve(A, B)
 
 
-@guvectorize(['void(float64[:], float64[:,:,:], float64[:])'],
-             '(Ndim),(i,i,i)->()')
+@guvectorize(['void(float64[:], float64[:,:,:,:], float64[:])'],
+             '(N),(M,i,i,i)->(M)')
 def trilinear_interpolation(pos, v, ret):
     '''Compute the trilinear interpolation of data at given position
 
@@ -146,6 +146,7 @@ def trilinear_interpolation(pos, v, ret):
     x = (xr, xl)
     y = (yr, yl)
     z = (zr, zl)
+    ret[...] = 0
 
     for i in range(2):
         for j in range(2):
@@ -249,7 +250,7 @@ def gradient(A, axis, dx=1):
 
 
 @njit
-def measure_hessian(position, data):
+def measure_hessian(position, data, LE=np.array([0, 0, 0])):
     '''Compute the value of the hessian of the field at the given position.
 
     Arguments
@@ -259,13 +260,14 @@ def measure_hessian(position, data):
     data : ndarray (Npt, Npt, Npt)
        The field itself
     '''
+    LE = np.asarray(LE)
     Npt = len(position)
     N = data.shape[0]
 
-    buff = np.empty((4, 4, 4))
-    hess_buff = np.empty((2, 2, 2))
-    tmp_buff = np.empty((4, 4, 4))
-    # tmp = np.empty(3)
+    buff = np.empty((6, 6, 6))
+    # Contains the value of h_ij at the corner
+    hij_buff = np.empty((6, 2, 2, 2))
+    tmp_buff = np.empty((6, 6, 6))
     ret = np.empty((Npt, 3, 3))
 
     ipos = np.empty(3, dtype=np.int32)
@@ -273,11 +275,11 @@ def measure_hessian(position, data):
     dpos = np.empty(3, dtype=np.float64)
 
     for ipt in range(Npt):
-        pos = position[ipt]
+        pos = position[ipt] - LE
 
-        ipos[:] = pos-1
-        jpos[:] = ipos+4
-        dpos[:] = pos - ipos - 1
+        ipos[:] = pos-2
+        jpos[:] = ipos+6
+        dpos[:] = pos - ipos - 2
 
         # Copy data with periodic boundaries
         for i0, i in enumerate(range(ipos[0], jpos[0])):
@@ -285,15 +287,22 @@ def measure_hessian(position, data):
                 for k0, k in enumerate(range(ipos[2], jpos[2])):
                     buff[i0, j0, k0] = data[i % N, j % N, k % N]
 
-        # Compute gradient using finite difference
+        # Compute hessian using finite difference
+        ii = 0
         for idim in range(3):
-            for jdim in range(idim, 3):
+            for jdim in range(idim+1):
                 tmp_buff[:] = gradient(gradient(buff, axis=idim), axis=jdim)
-                hess_buff[:, :, :] = tmp_buff[1:3, 1:3, 1:3]
+                hij_buff[ii, :, :, :] = tmp_buff[2:4, 2:4, 2:4]
 
-                tmp = trilinear_interpolation(dpos, hess_buff)
+                ii += 1
 
-                ret[ipt, idim, jdim] = tmp
-                ret[ipt, jdim, idim] = tmp
+        # Perform trilinear interpolation of the hessian
+        tmp = trilinear_interpolation(dpos, hij_buff)
+        ii = 0
+        for idim in range(3):
+            for jdim in range(idim+1):
+                ret[ipt, idim, jdim] = \
+                  ret[ipt, jdim, idim] = tmp[ii]
+                ii += 1
 
     return ret
