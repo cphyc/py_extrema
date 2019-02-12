@@ -114,3 +114,178 @@ def solve(A, B):
         return X
     else:
         return np.linalg.solve(A, B)
+
+
+@njit
+def trilinear_interpolation(pos, v):
+    '''Compute the trilinear interpolation of data at given position
+
+    Arguments
+    ---------
+    pos : 1d array
+       The position
+    v : (2, 2, 2) array
+    '''
+    xl, yl, zl = pos
+    xr, yr, zr = 1-pos
+
+    # Note the (inverse) order here!
+    x = (xr, xl)
+    y = (yr, yl)
+    z = (zr, zl)
+
+    ret = np.zeros(len(v))
+    for i in range(2):
+        for j in range(2):
+            for k in range(2):
+                vol = x[i] * y[j] * z[k]
+                ret += v[..., i, j, k] * vol
+
+    return ret
+
+
+@njit
+def gradient(A, axis, dx=1):
+    out = np.zeros_like(A)
+
+    ijk = np.array([0, 0, 0], dtype=np.int32)
+    ijkl = np.array([0, 0, 0], dtype=np.int32)
+    ijkr = np.array([0, 0, 0], dtype=np.int32)
+
+    i0 = j0 = k0 = 0
+    iN, jN, kN = A.shape
+
+    if axis == 0:
+        i0 += 1
+        iN -= 1
+    elif axis == 1:
+        j0 += 1
+        jN -= 1
+    elif axis == 2:
+        k0 += 1
+        kN -= 1
+
+    for i in range(i0, iN):
+        ijk[0] = ijkl[0] = ijkr[0] = i
+        if axis == 0:
+            ijkl[0] -= 1
+            ijkr[0] += 1
+        for j in range(j0, jN):
+            ijk[1] = ijkl[1] = ijkr[1] = j
+            if axis == 1:
+                ijkl[1] -= 1
+                ijkr[1] += 1
+            for k in range(k0, kN):
+                ijk[2] = ijkl[2] = ijkr[2] = k
+                if axis == 2:
+                    ijkl[2] -= 1
+                    ijkr[2] += 1
+
+                out[i, j, k] = (A[ijkr[0], ijkr[1], ijkr[2]] - A[ijkl[0], ijkl[1], ijkl[2]]) / 2 / dx
+
+    # Left edge
+    if axis == 0:
+        i0 = 0
+        iN = 1
+    elif axis == 1:
+        j0 = 0
+        jN = 1
+    elif axis == 2:
+        k0 = 0
+        kN = 1
+
+    for i in range(i0, iN):
+        ijk[0] = ijkr[0] = i
+        if axis == 0:
+            ijkr[0] += 1
+        for j in range(j0, jN):
+            ijk[1] = ijkr[1] = j
+            if axis == 1:
+                ijkr[1] += 1
+            for k in range(k0, kN):
+                ijk[2] = ijkr[2] = k
+                if axis == 2:
+                    ijkr[2] += 1
+
+                out[i, j, k] = (A[ijkr[0], ijkr[1], ijkr[2]] - A[ijk[0], ijk[1], ijk[2]]) / dx
+
+    # Right edge
+    if axis == 0:
+        i0 = A.shape[0]-1
+        iN = A.shape[0]
+    elif axis == 1:
+        j0 = A.shape[1]-1
+        jN = A.shape[1]
+    elif axis == 2:
+        k0 = A.shape[2]-1
+        kN = A.shape[2]
+
+    for i in range(i0, iN):
+        ijk[0] = ijkl[0] = i
+        if axis == 0:
+            ijkl[0] -= 1
+        for j in range(j0, jN):
+            ijk[1] = ijkl[1] = j
+            if axis == 1:
+                ijkl[1] -= 1
+            for k in range(k0, kN):
+                ijk[2] = ijkl[2] = k
+                if axis == 2:
+                    ijkl[2] -= 1
+
+                out[i, j, k] = (A[ijk[0], ijk[1], ijk[2]] - A[ijkl[0], ijkl[1], ijkl[2]]) / dx
+
+    return out
+
+
+@njit
+def measure_hessian(position, data):
+    '''Compute the value of the hessian of the field at the given position.
+
+    Arguments
+    ---------
+    position : ndarray (Npt, Ndim)
+       The position of the points in space in pixel units.
+    data : ndarray (Npt, Npt, Npt)
+       The field itself
+    '''
+    Npt = len(position)
+    N = data.shape[0]
+
+    buff = np.empty((4, 4, 4))
+    hess_buff = np.empty((6, 2, 2, 2))
+    tmp_buff = np.empty((3, 3, 3))
+    tmp = np.empty(3)
+    ret = np.empty((Npt, 3, 3))
+
+    ipos = np.empty(3, dtype=np.int32)
+    jpos = np.empty(3, dtype=np.int32)
+    dpos = np.empty(3, dtype=position.dtype)
+
+    for ipt in range(Npt):
+        pos = position[ipt]
+
+        ipos[:] = pos-1
+        jpos[:] = ipos+4
+        dpos[:] = pos - ipos + 1
+
+        # Copy data with periodic boundaries
+        for i in range(ipos[0], jpos[0]):
+            for j in range(ipos[1], jpos[1]):
+                for k in range(ipos[2], jpos[2]):
+                    buff[i, j] = data[i % N, j % N, k % N]
+
+        # Compute gradient using finite difference
+        ii = 0
+
+        for idim in range(3):
+            for jdim in range(idim, 3):
+                tmp_buff[:] = gradient(gradient(buff, axis=idim), axis=jdim)
+                hess_buff[ii, :, :, :] = tmp_buff[1:3, 1:3, 1:3]
+
+                # Linear interpolation (from
+                # http://paulbourke.net/miscellaneous/interpolation/)
+                tmp[:] = trilinear_interpolation(dpos, hess_buff)[0]
+                ret[ipt, idim, jdim] = tmp
+                ret[ipt, jdim, idim] = tmp
+    return ret
