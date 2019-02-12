@@ -1,6 +1,7 @@
-from numba import njit, guvectorize
-from collections import namedtuple, OrderedDict
+from numba import njit
+from collections import OrderedDict
 import numpy as np
+import numexpr as ne
 import attr
 import pandas as pd
 
@@ -67,7 +68,6 @@ def unravel_index(index, shape):
     return result
 
 
-@njit
 def solve(A, B):
     '''Solve the equation A*X = B.'''
 
@@ -80,12 +80,14 @@ def solve(A, B):
         b1 = B[..., 0]
         b2 = B[..., 1]
 
-        det = a*b - c**2
+        det = ne.evaluate('a*b - c**2')
 
-        X = np.zeros(B.shape)
-        X[..., 0] = (b*b1 - b2*c) / det
-        X[..., 1] = (a*b2 - b1*c) / det
-        
+        X = np.zeros(B.shape, order='F')
+        X[..., 0] = ne.evaluate('(b*b1 - b2*c) / det')
+        X[..., 1] = ne.evaluate('(a*b2 - b1*c) / det')
+
+        return X
+
     elif N == 3:
         a = A[..., 0, 0]
         b = A[..., 1, 1]
@@ -101,11 +103,14 @@ def solve(A, B):
         d2 = d**2
         f2 = f**2
         e2 = e**2
-        det = a*b*c - a*f2 - b*e2 - c*d2 + 2*d*e*f
 
-        X = np.zeros(B.shape)
-        X[..., 0] = (b*b1*c - b2*c*d - b*b3*e + b3*d*f + b2*e*f - b1*f2) / det
-        X[..., 1] = (a*b2*c - b1*c*d + b3*d*e - b2*e2 - a*b3*f + b1*e*f) / det
-        X[..., 2] = (a*b*b3 - b3*d2 - b*b1*e + b2*d*e - a*b2*f + b1*d*f) / det
+        det = ne.evaluate('a*b*c - a*f2 - b*e2 - c*d2 + 2*d*e*f')
+
+        X = np.zeros(B.shape, order='F')
+        X[..., 0] = ne.evaluate('(b*b1*c - b2*c*d - b*b3*e + b3*d*f + b2*e*f - b1*f2) / det')
+        X[..., 1] = ne.evaluate('(a*b2*c - b1*c*d + b3*d*e - b2*e2 - a*b3*f + b1*e*f) / det')
+        X[..., 2] = ne.evaluate('(a*b*b3 - b3*d2 - b*b1*e + b2*d*e - a*b2*f + b1*d*f) / det')
 
         return X
+    else:
+        return np.linalg.solve(A, B)

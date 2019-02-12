@@ -6,9 +6,11 @@ import unyt as U
 from unyt import unyt_array, unyt_quantity
 from unyt.dimensions import length
 
-from numba import jit
+from numba import jit, njit
 import logging
 from scipy.spatial import cKDTree as KDTree
+import numexpr as ne
+
 from .utils import FiniteDictionary, CriticalPoints, unravel_index, solve
 
 # create a logging format
@@ -26,7 +28,7 @@ logger.setLevel(logging.ERROR)
 logger.addHandler(handler)
 
 
-@jit(nopython=True)
+@jit
 def copy_xyz(xyz_rela):
     xyz_rel = np.ascontiguousarray(xyz_rela.T)
     shape = xyz_rel.shape[1:]
@@ -64,7 +66,7 @@ def copy_xyz(xyz_rela):
     return xyz.T, mask
 
 
-@jit
+@njit
 def distance2(a, b, N):
     """Compute the distance between two vectors with wrapping of size N."""
     d2 = 0
@@ -81,7 +83,7 @@ def distance2(a, b, N):
     return d2
 
 
-@jit(nopython=True)
+@njit
 def _cleanup_pairs_KDTree(xyz, xc, kind, pairs, N, shape):
     skip = np.zeros(len(xyz), dtype=np.uint8)
     for i, j in pairs:
@@ -193,7 +195,7 @@ class ExtremaFinder(object):
 
     FFT_args = None
 
-    def __init__(self, data, cache_len=10, clean_pairs_method='KDTree',
+    def __init__(self, data, cache_len=20, clean_pairs_method='KDTree',
                  nthreads=1, loglevel=None, boxlen=1):
 
         self.registry = reg = UnitRegistry()
@@ -341,11 +343,31 @@ class ExtremaFinder(object):
                 indices[idim, idim2] = indices[idim2, idim] = ihess
                 ihess += 1
 
-        logger.debug('Inverse FFT of gradient and hessian')
+        logger.debug('Inverse FFT of gradient')
         # Get them back in real space
         self.grad[...] = fft.irfftn(self.grad_f, axes=range(1, ndim+1), **self.FFT_args)
+        logger.debug('Inverse FFT of hessian')
         self.hess[...] = fft.irfftn(self.hess_f, axes=range(1, ndim+1), **self.FFT_args)
-        self.curvature[...] = np.linalg.det(self.hess[indices, ...].T).T
+        logger.debug('Curvature')
+        if ndim == 3:
+            a = self.hess[indices[0, 0]]
+            b = self.hess[indices[1, 1]]
+            c = self.hess[indices[2, 2]]
+            d = self.hess[indices[0, 1]]
+            e = self.hess[indices[0, 2]]
+            f = self.hess[indices[1, 2]]
+            self.curvature[...] = ne.evaluate(
+                'a*b*c - c*d**2 - b*e**2 + 2*d*e*f - a*f**2',
+                local_dict=dict(a=a, b=b, c=c, d=d, e=e, f=f))
+        elif ndim == 2:
+            a = self.hess[indices[0, 0]]
+            b = self.hess[indices[1, 1]]
+            c = self.hess[indices[0, 1]]
+            self.curvature[...] = ne.evaluate(
+                'a*b - c**2',
+                local_dict=dict(a=a, b=b, c=c))
+        else:
+            self.curvature[...] = np.linalg.det(self.hess[indices, ...].T.copy()).T
 
         return indices
 
@@ -375,7 +397,8 @@ class ExtremaFinder(object):
         logger.debug('Solving linear system to find extrema')
         # Find the location of the points (in relative coordinates)
         # shape (N, N, N, ndim)
-        xyz_rel = np.linalg.solve(lhs.T, rhs.T)
+        xyz_rel = solve(np.asfortranarray(lhs.T),
+                        np.asfortranarray(rhs.T))
 
         logger.debug('Discarding far extrema')
         # shapes (npoint, ndim) & (npoint, )
