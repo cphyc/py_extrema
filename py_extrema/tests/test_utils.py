@@ -1,4 +1,5 @@
-from py_extrema.utils import FiniteDictionary, unravel_index, solve, trilinear_interpolation, gradient, measure_hessian
+from py_extrema.utils import FiniteDictionary, unravel_index, solve,\
+     trilinear_interpolation, gradient, measure_hessian, measure_gradient
 from scipy.interpolate import RegularGridInterpolator
 import numpy as np
 
@@ -56,6 +57,7 @@ def testSolve2D():
     x2 = np.linalg.solve(A, B)
     assert_allclose(x1, x2)
 
+
 def testSolve3D():
     A0 = np.random.rand(8, 9, 10, 3, 3)
     A = (A0 + A0.swapaxes(-2, -1)) / 2  # Build symmetric matrix
@@ -92,6 +94,7 @@ def test_trilinear_interpolation():
 
     assert_allclose(ref, new)
 
+
 def test_trilinear_interpolation_2():
     data = np.random.rand(1, 2, 2, 2)
 
@@ -120,9 +123,6 @@ def test_measure_hessian():
              [1, 1, 2]], dtype=np.float64)
         return tmp
 
-    hess = np.array(np.gradient(np.gradient(data, axis=(-3, -2, -1)),
-                                axis=(-3, -2, -1)))
-
     ref = []
     exp = []
 
@@ -138,5 +138,35 @@ def test_measure_hessian():
 
     X = np.array(all_pos, dtype=np.float64)
     exp = measure_hessian(X, data)
+
+    assert_allclose(ref, exp)
+
+
+def test_measure_gradient():
+    np.random.seed(16091992)
+    x, y, z = np.meshgrid(*[np.arange(-5, 6)]*3, indexing='ij')
+    data = x**2 + y**2 + z**2 + x*y + y*z + x*z
+
+    def anal_grad(x, y, z):
+        tmp = np.array(
+            [2*x+y+z, x+2*y+z, x+y+2*z],
+            dtype=np.float64)
+        return tmp
+
+    ref = []
+    exp = []
+
+    all_pos = []
+    for i in range(1, 9):
+        for j in range(1, 9):
+            for k in range(1, 9):
+                all_pos.append([i, j, k])
+                X = np.array([i-5., j-5., k-5.])
+                ref.append(
+                    anal_grad(*X)
+                )
+
+    X = np.array(all_pos, dtype=np.float64)
+    exp = measure_gradient(X, data)
 
     assert_allclose(ref, exp)

@@ -7,6 +7,7 @@ from unyt import unyt_array
 from collections import namedtuple
 
 from .extrema import logger
+from .utils import measure_hessian
 
 ExtrData = namedtuple('ExtremaData', ['tree', 'data'])
 
@@ -144,6 +145,14 @@ class SloppingSaddle(object):
 
                 new_data = (datacur + dataprev) / 2
 
+                # Compute hessian at the position of the s.saddle
+                hess = measure_hessian(new_ss_pos,
+                                       self.ef.smooth(R))
+                for k, (vi, vj) in zip(
+                     ['h11', 'h22', 'h33', 'h12', 'h13', 'h23'],
+                     [(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)]):
+                    ii = keys.index(k)
+                    new_data[:, ii] = hess[:, vi, vj]
                 for ii, pos in enumerate(new_ss_pos):
                     ss_points.append((kind, iR+1, R, *new_data[ii, :], *pos))
 

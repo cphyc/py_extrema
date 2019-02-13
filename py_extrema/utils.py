@@ -306,3 +306,58 @@ def measure_hessian(position, data, LE=np.array([0, 0, 0])):
                 ii += 1
 
     return ret
+
+@jit(looplift=True)
+def measure_gradient(position, data, LE=np.array([0, 0, 0])):
+    '''Compute the value of the gradient of the field at the given position.
+
+    Arguments
+    ---------
+    position : ndarray (Npt, Ndim)
+       The position of the points in space in pixel units.
+    data : ndarray (Npt, Npt, Npt)
+       The field itself
+    '''
+    LE = np.asarray(LE)
+    Npt = len(position)
+    N = data.shape[0]
+
+    buff = np.empty((4, 4, 4))
+    # Contains the value of h_ij at the corner
+    grad_buff = np.empty((3, 2, 2, 2))
+    tmp_buff = np.empty((4, 4, 4))
+    ret = np.empty((Npt, 3))
+
+    ipos = np.empty(3, dtype=np.int32)
+    jpos = np.empty(3, dtype=np.int32)
+    dpos = np.empty(3, dtype=np.float64)
+
+    for ipt in range(Npt):
+        pos = position[ipt] - LE
+
+        ipos[:] = pos-1
+        jpos[:] = ipos+4
+        dpos[:] = pos - ipos - 1
+
+        # Copy data with periodic boundaries
+        for i0, i in enumerate(range(ipos[0], jpos[0])):
+            for j0, j in enumerate(range(ipos[1], jpos[1])):
+                for k0, k in enumerate(range(ipos[2], jpos[2])):
+                    buff[i0, j0, k0] = data[i % N, j % N, k % N]
+
+        # Compute hessian using finite difference
+        ii = 0
+        for idim in range(3):
+            tmp_buff[:] = gradient(buff, axis=idim)
+            grad_buff[ii, :, :, :] = tmp_buff[1:3, 1:3, 1:3]
+
+            ii += 1
+
+        # Perform trilinear interpolation of the hessian
+        tmp = trilinear_interpolation(dpos, grad_buff)
+        ii = 0
+        for idim in range(3):
+            ret[ipt, idim] = tmp[ii]
+            ii += 1
+
+    return ret
