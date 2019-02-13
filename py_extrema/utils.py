@@ -1,4 +1,4 @@
-from numba import njit, guvectorize
+from numba import njit, jit, guvectorize
 from collections import OrderedDict
 import numpy as np
 import numexpr as ne
@@ -249,7 +249,7 @@ def gradient(A, axis, dx=1):
     return out
 
 
-@njit
+@jit(looplift=True)
 def measure_hessian(position, data, LE=np.array([0, 0, 0])):
     '''Compute the value of the hessian of the field at the given position.
 

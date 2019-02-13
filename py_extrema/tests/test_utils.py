@@ -117,7 +117,7 @@ def test_measure_hessian():
         tmp = np.array(
             [[2, 1, 1],
              [1, 2, 1],
-             [1, 1, 2]]) * 1.0
+             [1, 1, 2]], dtype=np.float64)
         return tmp
 
     hess = np.array(np.gradient(np.gradient(data, axis=(-3, -2, -1)),
