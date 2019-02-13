@@ -377,12 +377,19 @@ def measure_third_derivative(position, data, eigenvectors):
     Returns
     -------
     Fxii : (N, Ndim)
-       The interpolated value of the derivative at the position.'''
+       The third derivative Fx11, Fx22, Fx33. See Notes for the
+       definition of the "x" axis
+
+    Notes
+    -----
+    The "x" axis is taken along the first eigenvector.
+    '''
     N, Ndim = position.shape
     M = eigenvectors.shape[0]
 
     if eigenvectors.shape != (N, Ndim, Ndim):
-        raise Exception(f'Wrong shape for eigenvectors: {eigenvectors.shape}, expected {(N, Ndim, Ndim)}.')
+        raise Exception(f'Wrong shape for eigenvectors: {eigenvectors.shape}, '
+                        f'expected {(N, Ndim, Ndim)}.')
     if Ndim != 3:
         raise Exception(f'Got dimension {Ndim}, expected Ndim=3.')
 
@@ -397,17 +404,13 @@ def measure_third_derivative(position, data, eigenvectors):
     x0 = position
 
     # Interpolate field along three eigenvectors
-    dx = np.arange(-2, 3)
-
-    x1 = (x0[:, None, :] + dx[None, :, None] * e1[:, None, :]) % M
-    x2 = (x0[:, None, :] + dx[None, :, None] * e2[:, None, :]) % M
-    x3 = (x0[:, None, :] + dx[None, :, None] * e3[:, None, :]) % M
-
-    # Fill array for interpolation
-    xi = np.zeros((3, N, 5, Ndim))
-    xi[0, ...] = x1
-    xi[1, ...] = x2
-    xi[2, ...] = x3
+    a1, a2, a3 = np.meshgrid([-2, -1, 0, 1, 2], [-1, 0, 1], [-1, 0, 1],
+                             indexing='ij')
+    NA = np.newaxis
+    xi = (a1[NA, :, :, :, NA] * e1[:, NA, NA, NA, :] +
+          a2[NA, :, :, :, NA] * e2[:, NA, NA, NA, :] +
+          a3[NA, :, :, :, NA] * e3[:, NA, NA, NA, :] +
+          x0[:, NA, NA, NA, :]) % M
 
     # Extend field on boundaries for linear interpolation near edges
     sl1 = (slice(1, -1), slice(None))
@@ -418,12 +421,20 @@ def measure_third_derivative(position, data, eigenvectors):
 
     for (sx1, sx2), (sy1, sy2), (sz1, sz2) in product(*[sl_all]*3):
         Fext[tuple((sx1, sy1, sz1))] = F[tuple((sx2, sy2, sz2))]
-    xx = np.arange(-1, M+1)
 
     # Interpolate third derivative using second order finite
     # difference. Values has shape (3, Npt, 5)
-    values = interpn((xx, xx, xx), Fext, xi)
-    coeff = np.array([-1/2, 1, 0, -1, 1/2])
-    Fxii = np.dot(values, coeff)  # shape: (3, Npt)
+    xx = np.arange(-1, M+1)
+    v = interpn((xx, xx, xx), Fext, xi)
 
-    return Fxii.T
+    D0 = [         0,  1,   0     ]
+    D1 = [   0, -1/2,  0, 1/2,   0]  # 2nd order 1-derivative
+    D2 = [         1, -2,   1     ]  # 2nd order 2-derivative
+    D3 = [-1/2,    1,  0,  -1, 1/2]  # 2nd order 3-derivative
+
+    # D1 = [ 1/12, -2/3, 0, 2/3, -1/12]  # 4th order 1-derivative
+    F111 = np.einsum('...ijk,i,j,k', v, D3, D0, D0)
+    F122 = np.einsum('...ijk,i,j,k', v, D1, D2, D0)
+    F133 = np.einsum('...ijk,i,j,k', v, D1, D0, D2)
+
+    return np.array((F111, F122, F133)).T

@@ -61,7 +61,7 @@ class SloppingSaddle(object):
         return self._trees
 
     def detect_extrema(self):
-        ndim = self.ef.ndim
+        Ndim = self.ef.ndim
         trees = self.trees
 
         # Compute cross tree distances. Slopping saddle are found where
@@ -71,7 +71,7 @@ class SloppingSaddle(object):
         for iR, R in enumerate(tqdm(Rgrid[:-1],
                                     desc='Finding s. saddle')):
             dR = Rgrid[iR+1] - R
-            for kind in range(1, ndim):
+            for kind in range(1, Ndim):
                 # Here we compare the distance from the current critical points
                 # to points at the next smoothing scale and next kind
                 # of critical points. There are two possibilities:
@@ -140,6 +140,8 @@ class SloppingSaddle(object):
 
                 # Compute third derivative in eigenframe
                 _, evals = np.linalg.eigh(hess)
+                # Roll the vanishing eigenvalue to place zero
+                evals = np.roll(evals, 1+kind-1, axis=-1)
                 third_deriv = measure_third_derivative(
                     new_ss_pos, self.ef.smooth(R), evals)
 
@@ -174,6 +176,8 @@ class SloppingSaddle(object):
 
                 # Compute third derivative in eigenframe
                 _, evals = np.linalg.eigh(hess)
+                # Roll the vanishing eigenvalue to place zero
+                evals = np.roll(evals, 1+kind, axis=-1)
                 third_deriv = measure_third_derivative(
                     new_ss_pos, self.ef.smooth(R), evals)
 
@@ -183,7 +187,7 @@ class SloppingSaddle(object):
                                       *third_deriv[ii, :], *pos))
 
         names = ['kind', 'iR', 'R'] + keys + ['Fx11', 'Fx22', 'Fx33']
-        for e in 'xyz'[:ndim]:
+        for e in 'xyz'[:Ndim]:
             names.append(e)
 
         self.slopping_saddle = pd.DataFrame(ss_points,
