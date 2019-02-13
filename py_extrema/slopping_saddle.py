@@ -7,7 +7,7 @@ from unyt import unyt_array
 from collections import namedtuple
 
 from .extrema import logger
-from .utils import measure_hessian
+from .utils import measure_hessian, measure_gradient, measure_third_derivative
 
 ExtrData = namedtuple('ExtremaData', ['tree', 'data'])
 
@@ -113,6 +113,7 @@ class SloppingSaddle(object):
                     'Slopping saddle rate %s: %.2f%%' %
                     (kind, mask_both.sum() / mask_both.shape[0] * 100))
 
+                ##################################################
                 # Compute position -- prev
                 new_ss_pos = self.compute_middle(
                     t.data[mask_prev],
@@ -128,9 +129,26 @@ class SloppingSaddle(object):
 
                 new_data = (datacur + dataprev) / 2
 
-                for ii, pos in enumerate(new_ss_pos):
-                    ss_points.append((kind-1, iR+1, R, *new_data[ii, :], *pos))
+                # Compute hessian at the position of the s.saddle
+                hess = measure_hessian(new_ss_pos,
+                                       self.ef.smooth(R))
+                for k, (vi, vj) in zip(
+                     ['h11', 'h22', 'h33', 'h12', 'h13', 'h23'],
+                     [(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)]):
+                    ii = keys.index(k)
+                    new_data[:, ii] = hess[:, vi, vj]
 
+                # Compute third derivative in eigenframe
+                _, evals = np.linalg.eigh(hess)
+                third_deriv = measure_third_derivative(
+                    new_ss_pos, self.ef.smooth(R), evals)
+
+                # Copy new data in
+                for ii, pos in enumerate(new_ss_pos):
+                    ss_points.append((kind-1, iR+1, R, *new_data[ii, :],
+                                      *third_deriv[ii, :], *pos))
+
+                ##################################################
                 # Compute position -- next
                 new_ss_pos = self.compute_middle(
                     t.data[mask_next],
@@ -153,10 +171,18 @@ class SloppingSaddle(object):
                      [(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)]):
                     ii = keys.index(k)
                     new_data[:, ii] = hess[:, vi, vj]
-                for ii, pos in enumerate(new_ss_pos):
-                    ss_points.append((kind, iR+1, R, *new_data[ii, :], *pos))
 
-        names = ['kind', 'iR', 'R'] + keys
+                # Compute third derivative in eigenframe
+                _, evals = np.linalg.eigh(hess)
+                third_deriv = measure_third_derivative(
+                    new_ss_pos, self.ef.smooth(R), evals)
+
+                # Copy new data in
+                for ii, pos in enumerate(new_ss_pos):
+                    ss_points.append((kind, iR+1, R, *new_data[ii, :],
+                                      *third_deriv[ii, :], *pos))
+
+        names = ['kind', 'iR', 'R'] + keys + ['Fx11', 'Fx22', 'Fx33']
         for e in 'xyz'[:ndim]:
             names.append(e)
 

@@ -4,6 +4,8 @@ import numpy as np
 import numexpr as ne
 import attr
 import pandas as pd
+from itertools import product
+from scipy.interpolate import interpn
 
 
 class FiniteDictionary(OrderedDict):
@@ -361,3 +363,67 @@ def measure_gradient(position, data, LE=np.array([0, 0, 0])):
             ii += 1
 
     return ret
+
+
+def measure_third_derivative(position, data, eigenvectors):
+    '''Measure the third derivative in the eigenframe
+
+    Arguments
+    ---------
+    position : (N, Ndim)
+    data : (M, M, M)
+    eigenvectors : (N, Ndim, Ndim)
+
+    Returns
+    -------
+    Fxii : (N, Ndim)
+       The interpolated value of the derivative at the position.'''
+    N, Ndim = position.shape
+    M = eigenvectors.shape[0]
+
+    if eigenvectors.shape != (N, Ndim, Ndim):
+        raise Exception(f'Wrong shape for eigenvectors: {eigenvectors.shape}, expected {(N, Ndim, Ndim)}.')
+    if Ndim != 3:
+        raise Exception(f'Got dimension {Ndim}, expected Ndim=3.')
+
+    e1 = eigenvectors[..., 0]
+    e2 = eigenvectors[..., 1]
+    e3 = eigenvectors[..., 2]
+
+    # Extend the field for interpolation
+    F = data
+    M = F.shape[0]
+    Fext = np.zeros((M+2, M+2, M+2))
+    x0 = position
+
+    # Interpolate field along three eigenvectors
+    dx = np.arange(-2, 3)
+
+    x1 = (x0[:, None, :] + dx[None, :, None] * e1[:, None, :]) % M
+    x2 = (x0[:, None, :] + dx[None, :, None] * e2[:, None, :]) % M
+    x3 = (x0[:, None, :] + dx[None, :, None] * e3[:, None, :]) % M
+
+    # Fill array for interpolation
+    xi = np.zeros((3, N, 5, Ndim))
+    xi[0, ...] = x1
+    xi[1, ...] = x2
+    xi[2, ...] = x3
+
+    # Extend field on boundaries for linear interpolation near edges
+    sl1 = (slice(1, -1), slice(None))
+    sl2 = (slice(1), slice(-1, None))
+    sl3 = (slice(-1, None), slice(1))
+
+    sl_all = (sl1, sl2, sl3)
+
+    for (sx1, sx2), (sy1, sy2), (sz1, sz2) in product(*[sl_all]*3):
+        Fext[tuple((sx1, sy1, sz1))] = F[tuple((sx2, sy2, sz2))]
+    xx = np.arange(-1, M+1)
+
+    # Interpolate third derivative using second order finite
+    # difference. Values has shape (3, Npt, 5)
+    values = interpn((xx, xx, xx), Fext, xi)
+    coeff = np.array([-1/2, 1, 0, -1, 1/2])
+    Fxii = np.dot(values, coeff)  # shape: (3, Npt)
+
+    return Fxii.T
