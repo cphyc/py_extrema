@@ -335,10 +335,13 @@ class ExtremaFinder(object):
         logger.debug('Computing hessian and gradient in Fourier space.')
         # Compute hessian and gradient in Fourier space
         for idim in range(ndim):
-            self.grad_f[idim, ...] = data_f * (1j) * kgrid[idim]
+            k1 = kgrid[idim]
+            self.grad_f[idim, ...] = ne.evaluate('data_f * 1j * k1')
             for idim2 in range(idim, ndim):
-                self.hess_f[ihess, ...] = (
-                    self.grad_f[idim, ...] * (1j) * kgrid[idim2])
+                k2 = kgrid[idim2]
+                grad_f = self.grad_f[idim, ...]
+                self.hess_f[ihess, ...] = ne.evaluate(
+                    'grad_f * 1j * k2')
 
                 indices[idim, idim2] = indices[idim2, idim] = ihess
                 ihess += 1
