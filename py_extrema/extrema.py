@@ -435,7 +435,8 @@ class ExtremaFinder(object):
         pos = self.array(xyz0[mask], 'pixel')
         hess = self.array(hess0[mask], '1/pixel**2')
         eigvals = self.array(eigvals0[mask], '1/pixel**2')
-        dens = self.array(dens0[mask], 'pixel')
+        dens = dens0[mask]
+        sigma = self.data_smooth(R).std() * np.ones_like(dens)
 
         # Convert to physical units
         data = CriticalPoints(
@@ -444,7 +445,8 @@ class ExtremaFinder(object):
             kind=kind0[mask],
             hessian=hess,
             npt=mask.sum(),
-            dens=dens
+            dens=dens,
+            sigma=sigma
         )
 
         self.extrema[R] = data

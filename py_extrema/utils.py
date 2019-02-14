@@ -42,6 +42,7 @@ class CriticalPoints:
     hessian = attr.ib(converter=np.atleast_3d)
     npt = attr.ib(converter=int)
     dens = attr.ib(converter=np.atleast_1d)
+    sigma = attr.ib(converter=np.atleast_1d)
 
     def as_dataframe(self):
         x, y, z = self.pos.T
