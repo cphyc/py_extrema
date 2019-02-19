@@ -9,6 +9,7 @@ from unyt.dimensions import length
 from numba import jit, njit
 import logging
 from scipy.spatial import cKDTree as KDTree
+from scipy.interpolate import interpn
 import numexpr as ne
 
 from .utils import FiniteDictionary, CriticalPoints, unravel_index, solve
@@ -30,6 +31,7 @@ logger.addHandler(handler)
 
 @jit
 def copy_xyz(xyz_rela):
+    '''Keep only the points found within 1pixel from their parent cell'''
     xyz_rel = np.ascontiguousarray(xyz_rela.T)
     shape = xyz_rel.shape[1:]
 
@@ -84,15 +86,19 @@ def distance2(a, b, N):
 
 
 @njit
-def _cleanup_pairs_KDTree(xyz, xc, kind, pairs, N, shape):
+def _cleanup_pairs_KDTree(xyz, xc, kind, pairs, N, shape, grad_norm=None):
     skip = np.zeros(len(xyz), dtype=np.uint8)
-    for i, j in pairs:
+    for ip in range(len(pairs)):
+        i, j = pairs[ip]
         if not skip[i] and not skip[j] and kind[i] == kind[j]:
             # Keep point closest to center of cell
             _xc = xc[i]
-            di = np.sum((xyz[i] - _xc)**2)
-            dj = np.sum((xyz[j] - _xc)**2)
-
+            if grad_norm is None:
+                di = np.sum((xyz[i] - _xc)**2)
+                dj = np.sum((xyz[j] - _xc)**2)
+            else:
+                di = grad_norm[i]
+                dj = grad_norm[j]
             if di > dj:
                 skip[i] = True
             else:
@@ -101,7 +107,7 @@ def _cleanup_pairs_KDTree(xyz, xc, kind, pairs, N, shape):
     return skip
 
 
-def cleanup_pairs_KDTree(xyz, kind, data_shape, dmin):
+def cleanup_pairs_KDTree(xyz, kind, data_shape, dmin, grad):
     npoint, ndim = xyz.shape
     N = data_shape[0]
     logger.debug('Building KDTree')
@@ -109,10 +115,12 @@ def cleanup_pairs_KDTree(xyz, kind, data_shape, dmin):
     if not np.all(np.asarray(data_shape) == data_shape[0]):
         raise Exception('All axis should have the same dimension.')
     tree = KDTree(xyz, boxsize=data_shape[0], copy_data=True)
-    pairs = list(tree.query_pairs(dmin, p=np.inf))
+    pairs = tree.query_pairs(dmin, p=np.inf, output_type='ndarray')
     logger.debug('Removing close pairs')
     xc = np.round(xyz + 0.5) - 0.5
-    skip = _cleanup_pairs_KDTree(xyz, xc, kind, pairs, N, data_shape).astype(bool)
+    print(np.linalg.norm(grad, axis=1).shape)
+    skip = _cleanup_pairs_KDTree(xyz, xc, kind, pairs, N, data_shape,
+                                 np.linalg.norm(grad, axis=1)).astype(bool)
     return ~skip
 
 
@@ -288,12 +296,12 @@ class ExtremaFinder(object):
         self.data_smooth[R] = fft.irfftn(data_f, **self.FFT_args)
         return self.data_smooth[R]
 
-    def clean_pairs(self, xyz0, kind0):
+    def clean_pairs(self, xyz0, kind0, grad):
         if self.clean_pairs_method == 'KDTree':
             boxlen = self.data_raw.shape
             mask = cleanup_pairs_KDTree(
                 np.mod(xyz0, boxlen),
-                kind0, self.data_raw.shape, self.dmin)
+                kind0, self.data_raw.shape, self.dmin, grad)
 
         elif self.clean_pairs_method == 'direct':
             cleanup_pairs_N2(xyz0, kind0, self.data_raw.shape)
@@ -393,6 +401,7 @@ class ExtremaFinder(object):
             self.smooth(R)
 
         indices = self.compute_derivatives(R)
+        grid = np.linspace(0, shape[0], shape[0])
 
         rhs = -self.grad
         lhs = self.hess[indices.flatten(), ...].reshape(ndim, ndim, *shape)
@@ -408,14 +417,17 @@ class ExtremaFinder(object):
         xyz0, mask0 = copy_xyz(xyz_rel)
         mask0 = (mask0 == 1)
 
+        print(indices)
         # shape (npoint)
-        dens0 = self.smooth(R).flatten()[mask0]
+        dens0 = interpn([grid]*ndim, self.smooth(R), xyz0 % shape)
 
         # shape (npoint, ndim, ndim)
-        hess0 = (self.hess.reshape(ndim*(ndim+1)//2, -1)
-                 [:, mask0]
-                 [indices.flatten()]
-                 .reshape(ndim, ndim, -1)).T
+        # For the interpolation, move the hessian component at the end
+        hess0 = (interpn([grid]*ndim, np.moveaxis(self.hess, 0, -1), xyz0 % shape)
+                 [..., indices]
+                 .reshape(-1, ndim, ndim))
+        grad0 = (interpn([grid]*ndim, np.moveaxis(self.grad, 0, -1), xyz0 % shape)
+                 .reshape(-1, ndim))
 
         logger.debug('Computing eigenvalues')
         # shape (npoint, ndim)
@@ -429,7 +441,7 @@ class ExtremaFinder(object):
                      self.clean_pairs_method)
 
         # Remove duplicate points
-        mask = self.clean_pairs(xyz0, kind0)
+        mask = self.clean_pairs(xyz0, kind0, grad0)
 
         # Add units
         pos = self.array(xyz0[mask], 'pixel')
