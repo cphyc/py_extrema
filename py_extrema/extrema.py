@@ -151,36 +151,6 @@ def cleanup_pairs_N2(xyz, kind, data_shape):
                     xyz[j, :] = -1
 
 
-#@jit(nopython=True)
-# def cleanup_pairsold(xyz, kind, data_shape):
-#     npoint, ndim = xyz.shape
-#     tmp = np.zeros(data_shape, dtype=np.int32)
-#     N = data_shape[0]
-
-#     ijk = [(0,)]*ndim
-#     iold = 0
-
-#     Nextr = xyz.shape[0]
-#     for inew in range(Nextr):
-#         pos = xyz[inew, :]
-#         for idim in range(ndim):
-#             ijk[idim] = (int((np.round(xyz[inew, idim]))) % N, )
-
-#         # Get index of old value
-#         iold = tmp[ijk][0]
-#         if iold > 0:
-#             oldpos = xyz[iold, ...]
-#             # Old is closer than old, keep new
-#             if ( distance2(oldpos, ijk, N) > distance2(pos, ijk, N) and
-#                  kind[inew] == kind[iold]):
-#                 tmp[ijk] = inew
-#         else:
-#             tmp[ijk] = inew
-#     indexes = tmp[tmp > 0]
-
-#     return xyz[indexes, :], indexes
-
-
 class ExtremaFinder(object):
     """A class to smooth an extract extrema from a n-dimensional field."""
 
