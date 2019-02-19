@@ -118,7 +118,6 @@ def cleanup_pairs_KDTree(xyz, kind, data_shape, dmin, grad):
     pairs = tree.query_pairs(dmin, p=np.inf, output_type='ndarray')
     logger.debug('Removing close pairs')
     xc = np.round(xyz + 0.5) - 0.5
-    print(np.linalg.norm(grad, axis=1).shape)
     skip = _cleanup_pairs_KDTree(xyz, xc, kind, pairs, N, data_shape,
                                  np.linalg.norm(grad, axis=1)).astype(bool)
     return ~skip
@@ -417,7 +416,6 @@ class ExtremaFinder(object):
         xyz0, mask0 = copy_xyz(xyz_rel)
         mask0 = (mask0 == 1)
 
-        print(indices)
         # shape (npoint)
         dens0 = interpn([grid]*ndim, self.smooth(R), xyz0 % shape)
 
