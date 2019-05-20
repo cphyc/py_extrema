@@ -68,10 +68,10 @@ class SloppingSaddle(object):
         # the closest point is of different kind.
         ss_points = []
         Rgrid = self.Rgrid.to('pixel').value
+        keys = ['l1', 'l2', 'l3', 'h11', 'h22', 'h33', 'h12', 'h13', 'h23', 'dens']
         for iR, R in enumerate(tqdm(Rgrid[:-1],
                                     desc='Finding s. saddle')):
-            dR = Rgrid[iR+1] - R
-            for kind in range(1, Ndim):
+            for kind in range(Ndim):
                 # Here we compare the distance from the current critical points
                 # to points at the next smoothing scale and next kind
                 # of critical points. There are two possibilities:
@@ -89,9 +89,9 @@ class SloppingSaddle(object):
 
                 # Compute distance to other critical points
                 # previous kind
-                tprev = trees[kind - 1][iR].tree
-                dprev, iprev = tprev.query(t.data,
-                                           distance_upper_bound=2*R)
+                # tprev = trees[kind - 1][iR].tree
+                # dprev, iprev = tprev.query(t.data,
+                #                            distance_upper_bound=2*R)
 
                 # next kind
                 tnext = trees[kind + 1][iR].tree
@@ -102,53 +102,53 @@ class SloppingSaddle(object):
                 # * there is no crit. pt. of same kind within a few dR
                 # * there is a crit. pt. at same scale of next kind
                 #   (e.g. saddle point-peak)
-                mask_prev = (dprev < dnextR) & (dprev < dnext) \
-                  & np.isfinite(dprev)
-                mask_next = (dnext < dnextR) & (dnext < dprev) \
-                  & np.isfinite(dnext)
+                # mask_prev = (dprev < dnextR) & (dprev < dnext) \
+                #   & np.isfinite(dprev)
+                mask_next = ((dnext < dnextR) & # (dnext < dprev) \
+                             np.isfinite(dnext))
 
-                mask_both = mask_prev | mask_next
+                # mask_both = mask_prev | mask_next
 
-                logger.debug(
-                    'Slopping saddle rate %s: %.2f%%' %
-                    (kind, mask_both.sum() / mask_both.shape[0] * 100))
+                # logger.debug(
+                #     'Slopping saddle rate %s: %.2f%%' %
+                #     (kind, mask_both.sum() / mask_both.shape[0] * 100))
 
-                ##################################################
-                # Compute position -- prev
-                new_ss_pos = self.compute_middle(
-                    t.data[mask_prev],
-                    tprev.data[iprev[mask_prev]])
+                # ##################################################
+                # # Compute position -- prev
+                # new_ss_pos = self.compute_middle(
+                #     t.data[mask_prev],
+                #     tprev.data[iprev[mask_prev]])
 
-                # Compute data
-                keys = ['l1', 'l2', 'l3', 'h11', 'h22', 'h33', 'h12', 'h13', 'h23', 'dens']
-                A = trees[kind][iR].data.loc[mask_prev][keys]
-                B = trees[kind-1][iR].data.iloc[iprev[mask_prev]][keys]
+                # # Compute data
+                # keys = ['l1', 'l2', 'l3', 'h11', 'h22', 'h33', 'h12', 'h13', 'h23', 'dens']
+                # A = trees[kind][iR].data.loc[mask_prev][keys]
+                # B = trees[kind-1][iR].data.iloc[iprev[mask_prev]][keys]
 
-                datacur = A.values
-                dataprev = B.values
+                # datacur = A.values
+                # dataprev = B.values
 
-                new_data = (datacur + dataprev) / 2
+                # new_data = (datacur + dataprev) / 2
 
-                # Compute hessian at the position of the s.saddle
-                hess = measure_hessian(new_ss_pos,
-                                       self.ef.smooth(R))
-                for k, (vi, vj) in zip(
-                     ['h11', 'h22', 'h33', 'h12', 'h13', 'h23'],
-                     [(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)]):
-                    ii = keys.index(k)
-                    new_data[:, ii] = hess[:, vi, vj]
+                # # Compute hessian at the position of the s.saddle
+                # hess = measure_hessian(new_ss_pos,
+                #                        self.ef.smooth(R))
+                # for k, (vi, vj) in zip(
+                #      ['h11', 'h22', 'h33', 'h12', 'h13', 'h23'],
+                #      [(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)]):
+                #     ii = keys.index(k)
+                #     new_data[:, ii] = hess[:, vi, vj]
 
-                # Compute third derivative in eigenframe
-                _, evals = np.linalg.eigh(hess)
-                # Roll the vanishing eigenvalue to place zero
-                evals = np.roll(evals, 1+kind-1, axis=-1)
-                third_deriv = measure_third_derivative(
-                    new_ss_pos, self.ef.smooth(R), evals)
+                # # Compute third derivative in eigenframe
+                # _, evals = np.linalg.eigh(hess)
+                # # Roll the vanishing eigenvalue to place zero
+                # evals = np.roll(evals, 1+kind-1, axis=-1)
+                # third_deriv = measure_third_derivative(
+                #     new_ss_pos, self.ef.smooth(R), evals)
 
-                # Copy new data in
-                for ii, pos in enumerate(new_ss_pos):
-                    ss_points.append((kind-1, iR+1, R, *new_data[ii, :],
-                                      *third_deriv[ii, :], *pos))
+                # # Copy new data in
+                # for ii, pos in enumerate(new_ss_pos):
+                #     ss_points.append((kind-1, iR+1, R, *new_data[ii, :],
+                #                       *third_deriv[ii, :], *pos))
 
                 ##################################################
                 # Compute position -- next
@@ -190,6 +190,31 @@ class SloppingSaddle(object):
         for e in 'xyz'[:Ndim]:
             names.append(e)
 
-        self.slopping_saddle = pd.DataFrame(ss_points,
-                                            columns=names)
+        # Critical points of kind 1..ndim-1 are counted twice, so we have to
+        # remove them
+        logger.debug('Discarding double counts')
+        boxsize = self.ef.data_shape[0]
+        ret = pd.DataFrame(ss_points, columns=names)
+        ret['keep'] = True
+
+        Ndiscard = 0
+        for kind in range(Ndim):
+            selection = (ret.kind == kind)
+            pos = ret.loc[selection, ['x', 'y', 'z', 'iR']].values % boxsize
+            tree = KDTree(pos, boxsize=boxsize)
+            discard_ids = np.unique(tree.query_pairs(
+                r=1.1, output_type='ndarray', p=np.inf)[:, 1])
+
+            keep = np.ones(pos.shape[0], dtype=bool)
+            keep[discard_ids] = False
+
+            Ndiscard += len(discard_ids)
+            ret.loc[selection, 'keep'] = keep
+
+        logger.info(f'Discarding {Ndiscard}/{len(ret)} points')
+
+        self.slopping_saddle = ret[ret.keep]
+
+        # self.slopping_saddle = pd.DataFrame(ss_points,
+        #                                     columns=names)
         return self.slopping_saddle
