@@ -111,51 +111,7 @@ class SloppingSaddle(object):
                 #   (e.g. saddle point-peak)
                 # mask_prev = (dprev < dnextR) & (dprev < dnext) \
                 #   & np.isfinite(dprev)
-                mask_next = ((dnext < dnextR) & # (dnext < dprev) \
-                             np.isfinite(dnext))
-
-                # mask_both = mask_prev | mask_next
-
-                # logger.debug(
-                #     'Slopping saddle rate %s: %.2f%%' %
-                #     (kind, mask_both.sum() / mask_both.shape[0] * 100))
-
-                # ##################################################
-                # # Compute position -- prev
-                # new_ss_pos = self.compute_middle(
-                #     t.data[mask_prev],
-                #     tprev.data[iprev[mask_prev]])
-
-                # # Compute data
-                # keys = ['l1', 'l2', 'l3', 'h11', 'h22', 'h33', 'h12', 'h13', 'h23', 'dens']
-                # A = trees[kind][iR].data.loc[mask_prev][keys]
-                # B = trees[kind-1][iR].data.iloc[iprev[mask_prev]][keys]
-
-                # datacur = A.values
-                # dataprev = B.values
-
-                # new_data = (datacur + dataprev) / 2
-
-                # # Compute hessian at the position of the s.saddle
-                # hess = measure_hessian(new_ss_pos,
-                #                        self.ef.smooth(R))
-                # for k, (vi, vj) in zip(
-                #      ['h11', 'h22', 'h33', 'h12', 'h13', 'h23'],
-                #      [(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)]):
-                #     ii = keys.index(k)
-                #     new_data[:, ii] = hess[:, vi, vj]
-
-                # # Compute third derivative in eigenframe
-                # _, evals = np.linalg.eigh(hess)
-                # # Roll the vanishing eigenvalue to place zero
-                # evals = np.roll(evals, 1+kind-1, axis=-1)
-                # third_deriv = measure_third_derivative(
-                #     new_ss_pos, self.ef.smooth(R), evals)
-
-                # # Copy new data in
-                # for ii, pos in enumerate(new_ss_pos):
-                #     ss_points.append((kind-1, iR+1, R, *new_data[ii, :],
-                #                       *third_deriv[ii, :], *pos))
+                mask_next = ((dnext < dnextR) & np.isfinite(dnext))
 
                 ##################################################
                 # Compute position -- next
