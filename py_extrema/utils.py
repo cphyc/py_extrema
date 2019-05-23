@@ -4,8 +4,8 @@ import numpy as np
 import numexpr as ne
 import attr
 import pandas as pd
-from itertools import product
-from scipy.interpolate import interpn
+from itertools import product, combinations
+from scipy.interpolate import RegularGridInterpolator
 
 
 class FiniteDictionary(OrderedDict):
@@ -34,6 +34,14 @@ class FiniteDictionary(OrderedDict):
         return self[list(self.keys())[-1]]
 
 
+def get_xyz_keys(Ndim):
+    if Ndim <= 3:
+        keys = ['x', 'y', 'z'][:Ndim]
+    else:
+        keys = [f'x{i+1}' for i in range(Ndim)]
+    return keys
+
+
 @attr.s(frozen=True)
 class CriticalPoints:
     pos = attr.ib(converter=np.atleast_2d)
@@ -45,18 +53,20 @@ class CriticalPoints:
     sigma = attr.ib(converter=np.atleast_1d)
 
     def as_dataframe(self):
-        x, y, z = self.pos.T
-        l1, l2, l3 = self.eigvals.T
-        h11, h22, h33, h12, h13, h23 = (
-            self.hessian[:, i, j]
-            for i, j in ((0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)))
+        Ndim = self.pos.shape[1]
+        keys = get_xyz_keys(Ndim)
 
-        return pd.DataFrame(dict(
-            x=x, y=y, z=z,
-            l1=l1, l2=l2, l3=l3,
-            kind=self.kind,
-            h11=h11, h22=h22, h33=h33, h12=h12, h13=h13, h23=h23,
-            dens=self.dens))
+        data = {}
+        for i in range(Ndim):
+            data[keys[i]] = self.pos[..., i]
+            data[f'l{i+1}'] = self.eigvals[..., i]
+
+            for j in range(i, Ndim):
+                data[f'h{i+1}{j+1}'] = self.hessian[..., i, j]
+
+        data['kind'] = self.kind
+        data['dens'] = self.dens
+        return pd.DataFrame(data)
 
 
 @njit
@@ -253,7 +263,7 @@ def gradient(A, axis, dx=1):
 
 
 @jit(looplift=True)
-def measure_hessian(position, data, LE=np.array([0, 0, 0])):
+def measure_hessian_3d(position, data, LE=np.array([0, 0, 0])):
     '''Compute the value of the hessian of the field at the given position.
 
     Arguments
@@ -273,9 +283,9 @@ def measure_hessian(position, data, LE=np.array([0, 0, 0])):
     tmp_buff = np.empty((6, 6, 6))
     ret = np.empty((Npt, 3, 3))
 
-    ipos = np.empty(3, dtype=np.int32)
-    jpos = np.empty(3, dtype=np.int32)
-    dpos = np.empty(3, dtype=np.float64)
+    ipos = np.empty(Ndim, dtype=np.int32)
+    jpos = np.empty(Ndim, dtype=np.int32)
+    dpos = np.empty(Ndim, dtype=np.float64)
 
     for ipt in range(Npt):
         pos = position[ipt] - LE
@@ -292,9 +302,9 @@ def measure_hessian(position, data, LE=np.array([0, 0, 0])):
 
         # Compute hessian using finite difference
         ii = 0
-        for idim in range(3):
-            for jdim in range(idim+1):
-                tmp_buff[:] = gradient(gradient(buff, axis=idim), axis=jdim)
+        for i in range(3):
+            for jdim in range(i+1):
+                tmp_buff[:] = gradient(gradient(buff, axis=i), axis=jdim)
                 hij_buff[ii, :, :, :] = tmp_buff[2:4, 2:4, 2:4]
 
                 ii += 1
@@ -302,13 +312,44 @@ def measure_hessian(position, data, LE=np.array([0, 0, 0])):
         # Perform trilinear interpolation of the hessian
         tmp = trilinear_interpolation(dpos, hij_buff)
         ii = 0
-        for idim in range(3):
-            for jdim in range(idim+1):
-                ret[ipt, idim, jdim] = \
-                  ret[ipt, jdim, idim] = tmp[ii]
+        for i in range(3):
+            for jdim in range(i+1):
+                ret[ipt, i, jdim] = \
+                  ret[ipt, jdim, i] = tmp[ii]
                 ii += 1
 
     return ret
+
+
+def measure_hessian(position, data, LE=np.array([0, 0, 0])):
+    Ndim = data.ndim
+    Npt = len(position)
+    N = data.shape[0]
+
+    if Ndim == 3:
+        return measure_hessian_3d(position, data, LE)
+
+    # Pad one in each dimension for the regular grid interpolation
+    data_padded = np.pad(data, [(1, 1)]*Ndim, 'wrap')
+    grid = [np.arange(-1, N+1)]*Ndim
+
+    grad = [np.gradient(data_padded, axis=_) for _ in range(Ndim)]
+    hess_flat = np.stack([
+        np.gradient(grad[i], axis=j)
+        for i in range(Ndim)
+        for j in range(i, Ndim)], axis=-1)
+    interpolator = RegularGridInterpolator(grid, hess_flat)
+
+    # Unpack in Ndim x Ndim
+    hess_interp = interpolator(position)
+    hess_at_pt = np.empty((Npt, Ndim, Ndim))
+    ii = 0
+    for i in range(Ndim):
+        for j in range(i, Ndim):
+            hess_at_pt[:, i, j] = hess_at_pt[:, j, i] = hess_interp[:, ii]
+            ii += 1
+    return hess_at_pt
+
 
 @jit(looplift=True)
 def measure_gradient(position, data, LE=np.array([0, 0, 0])):
@@ -350,8 +391,8 @@ def measure_gradient(position, data, LE=np.array([0, 0, 0])):
 
         # Compute hessian using finite difference
         ii = 0
-        for idim in range(3):
-            tmp_buff[:] = gradient(buff, axis=idim)
+        for i in range(3):
+            tmp_buff[:] = gradient(buff, axis=i)
             grad_buff[ii, :, :, :] = tmp_buff[1:3, 1:3, 1:3]
 
             ii += 1
@@ -359,8 +400,8 @@ def measure_gradient(position, data, LE=np.array([0, 0, 0])):
         # Perform trilinear interpolation of the hessian
         tmp = trilinear_interpolation(dpos, grad_buff)
         ii = 0
-        for idim in range(3):
-            ret[ipt, idim] = tmp[ii]
+        for i in range(3):
+            ret[ipt, i] = tmp[ii]
             ii += 1
 
     return ret

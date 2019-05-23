@@ -7,9 +7,10 @@ from unyt import unyt_array
 from collections import namedtuple
 
 from .extrema import logger
-from .utils import measure_hessian, measure_gradient, measure_third_derivative
+from .utils import measure_hessian, measure_third_derivative, get_xyz_keys
 
 ExtrData = namedtuple('ExtremaData', ['tree', 'data'])
+
 
 class SloppingSaddle(object):
     """A class to detect slopping saddle point by successive smoothing."""
@@ -51,7 +52,8 @@ class SloppingSaddle(object):
             ext = self.ef.find_extrema(R).as_dataframe()
             for k in range(ndim+1):
                 mask = (ext.kind == k)
-                pos = ext.loc[mask, ['x', 'y', 'z']].values
+                keys = get_xyz_keys(ndim)
+                pos = ext.loc[mask, keys].values
                 trees[k][iR] = ExtrData(
                     tree=KDTree(np.mod(pos, boxsize),
                                 boxsize=boxsize),
@@ -68,7 +70,12 @@ class SloppingSaddle(object):
         # the closest point is of different kind.
         ss_points = []
         Rgrid = self.Rgrid.to('pixel').value
-        keys = ['l1', 'l2', 'l3', 'h11', 'h22', 'h33', 'h12', 'h13', 'h23', 'dens']
+        keys = ['dens']
+        for i in range(Ndim):
+            keys.append(f'l{i+1}')
+            for j in range(i, Ndim):
+                keys.append(f'h{i+1}{j+1}')
+
         for iR, R in enumerate(tqdm(Rgrid[:-1],
                                     desc='Finding s. saddle')):
             for kind in range(Ndim):
@@ -168,27 +175,30 @@ class SloppingSaddle(object):
                 # Compute hessian at the position of the s.saddle
                 hess = measure_hessian(new_ss_pos,
                                        self.ef.smooth(R))
-                for k, (vi, vj) in zip(
-                     ['h11', 'h22', 'h33', 'h12', 'h13', 'h23'],
-                     [(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)]):
-                    ii = keys.index(k)
-                    new_data[:, ii] = hess[:, vi, vj]
+                for i in range(Ndim):
+                    for j in range(i, Ndim):
+                        k = f'h{i+1}{j+1}'
+                        ii = keys.index(k)
+                        new_data[:, ii] = hess[:, i, j]
 
-                # Compute third derivative in eigenframe
-                _, evals = np.linalg.eigh(hess)
-                # Roll the vanishing eigenvalue to place zero
-                evals = np.roll(evals, 1+kind, axis=-1)
-                third_deriv = measure_third_derivative(
-                    new_ss_pos, self.ef.smooth(R), evals)
+                if Ndim == 3:
+                    # Compute third derivative in eigenframe
+                    _, evals = np.linalg.eigh(hess)
+                    # Roll the vanishing eigenvalue to place zero
+                    evals = np.roll(evals, 1+kind, axis=-1)
+                    third_deriv = measure_third_derivative(
+                        new_ss_pos, self.ef.smooth(R), evals)
+                else:
+                    third_deriv = np.zeros((len(new_ss_pos), Ndim)) * np.nan
 
                 # Copy new data in
                 for ii, pos in enumerate(new_ss_pos):
                     ss_points.append((kind, iR+1, R, *new_data[ii, :],
                                       *third_deriv[ii, :], *pos))
 
-        names = ['kind', 'iR', 'R'] + keys + ['Fx11', 'Fx22', 'Fx33']
-        for e in 'xyz'[:Ndim]:
-            names.append(e)
+        Fxkeys = [f'Fx{i+1}{i+1}' for i in range(Ndim)]
+        names = ['kind', 'iR', 'R'] + keys + Fxkeys
+        names.extend(get_xyz_keys(Ndim))
 
         # Critical points of kind 1..ndim-1 are counted twice, so we have to
         # remove them
@@ -200,7 +210,8 @@ class SloppingSaddle(object):
         Ndiscard = 0
         for kind in range(Ndim):
             selection = (ret.kind == kind)
-            pos = ret.loc[selection, ['x', 'y', 'z', 'iR']].values % boxsize
+            keys = get_xyz_keys(Ndim)
+            pos = ret.loc[selection, keys + ['iR']].values % boxsize
             tree = KDTree(pos, boxsize=boxsize)
             discard_ids = np.unique(tree.query_pairs(
                 r=1.1, output_type='ndarray', p=np.inf)[:, 1])
