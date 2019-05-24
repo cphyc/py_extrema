@@ -78,6 +78,8 @@ class SloppingSaddle(object):
 
         for iR, R in enumerate(tqdm(Rgrid[:-1],
                                     desc='Finding s. saddle')):
+            pairs = {}
+            ss_points_data = {}
             for kind in range(Ndim):
                 # Here we compare the distance from the current critical points
                 # to points at the next smoothing scale and next kind
@@ -87,6 +89,7 @@ class SloppingSaddle(object):
                 # 2. there is one critical point _of another kind_ at
                 #    the current scale: the critical point disappears
                 t = trees[kind][iR].tree
+                ind_mine = np.arange(len(t.data), dtype=int)
 
                 # Compute smallest distance to same kind at next
                 # smoothing scale
@@ -95,12 +98,6 @@ class SloppingSaddle(object):
                     t.data, distance_upper_bound=2*R)
 
                 # Compute distance to other critical points
-                # previous kind
-                # tprev = trees[kind - 1][iR].tree
-                # dprev, iprev = tprev.query(t.data,
-                #                            distance_upper_bound=2*R)
-
-                # next kind
                 tnext = trees[kind + 1][iR].tree
                 dnext, inext = tnext.query(t.data,
                                            distance_upper_bound=2*R)
@@ -112,6 +109,10 @@ class SloppingSaddle(object):
                 # mask_prev = (dprev < dnextR) & (dprev < dnext) \
                 #   & np.isfinite(dprev)
                 mask_next = ((dnext < dnextR) & np.isfinite(dnext))
+
+                # Store pair information for later use
+                pairs[kind] = (ind_mine[mask_next], inext[mask_next],
+                               dnext[mask_next])
 
                 ##################################################
                 # Compute position -- next
@@ -129,8 +130,7 @@ class SloppingSaddle(object):
                 new_data = (datacur + dataprev) / 2
 
                 # Compute hessian at the position of the s.saddle
-                hess = measure_hessian(new_ss_pos,
-                                       self.ef.smooth(R))
+                hess = measure_hessian(new_ss_pos, self.ef.smooth(R))
                 for i in range(Ndim):
                     for j in range(i, Ndim):
                         k = f'h{i+1}{j+1}'
@@ -148,9 +148,43 @@ class SloppingSaddle(object):
                     third_deriv = np.zeros((len(new_ss_pos), Ndim)) * np.nan
 
                 # Copy new data in
+                tmp = []
                 for ii, pos in enumerate(new_ss_pos):
-                    ss_points.append((kind, iR+1, R, *new_data[ii, :],
-                                      *third_deriv[ii, :], *pos))
+                    tmp.append((kind, iR+1, R, *new_data[ii, :],
+                               *third_deriv[ii, :], *pos))
+                ss_points_data[kind] = tmp
+
+            # We may have counted twice some points
+            keep = {k: np.ones(len(v), dtype=bool)
+                    for k, v in ss_points_data.items()}
+            for kind in range(Ndim-1):
+                _, i1, d1 = pairs[kind]
+                i2, _, d2 = pairs[kind+1]
+
+                order1 = np.argsort(i1)
+                order2 = np.argsort(i2)
+
+                d1o = d1[order1]
+                d2o = d2[order2]
+
+                # Find elements in both sets and eventually discard them
+                # now i1[ind1] and i2[ind2] are the same set
+                icommon = np.intersect1d(i1, i2)
+                ind1 = np.searchsorted(i1, icommon, sorter=order1)
+                ind2 = np.searchsorted(i2, icommon, sorter=order2)
+
+                m = np.ones_like(i1, dtype=bool)
+                m[ind1] = d1o[ind1] < d2o[ind2]
+                keep[kind  ][order1] = m
+
+                m = np.ones_like(i2, dtype=bool)
+                m[ind2] = d2o[ind2] < d1o[ind1]
+                keep[kind+1][order2] = m
+
+            for kind in range(Ndim):
+                ss_points.extend(
+                    (_ for i, _ in enumerate(ss_points_data[kind])
+                     if keep[kind][i]))
 
         Fxkeys = [f'Fx{i+1}{i+1}' for i in range(Ndim)]
         names = ['kind', 'iR', 'R'] + keys + Fxkeys
