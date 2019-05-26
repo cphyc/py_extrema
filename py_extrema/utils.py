@@ -5,7 +5,7 @@ import numexpr as ne
 import attr
 import pandas as pd
 from itertools import product
-from scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import RegularGridInterpolator, interpn
 
 
 class FiniteDictionary(OrderedDict):
