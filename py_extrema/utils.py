@@ -4,7 +4,7 @@ import numpy as np
 import numexpr as ne
 import attr
 import pandas as pd
-from itertools import product, combinations
+from itertools import product
 from scipy.interpolate import RegularGridInterpolator
 
 
@@ -276,6 +276,7 @@ def measure_hessian_3d(position, data, LE=np.array([0, 0, 0])):
     LE = np.asarray(LE)
     Npt = len(position)
     N = data.shape[0]
+    Ndim = data.ndim
 
     buff = np.empty((6, 6, 6))
     # Contains the value of h_ij at the corner
