@@ -4,16 +4,20 @@ import numpy as np
 from tqdm.autonotebook import tqdm
 import pandas as pd
 from unyt import unyt_array
-from collections import namedtuple
 
 from .extrema import logger
 from .utils import measure_hessian, measure_third_derivative, get_xyz_keys
 
-ExtrData = namedtuple('ExtremaData', ['tree', 'data'])
-
 
 class SloppingSaddle(object):
-    """A class to detect slopping saddle point by successive smoothing."""
+    """A class to detect slopping saddle point by successive smoothing.
+
+    Parameters
+    ----------
+    extrema_finder : ExtremaFinder instance
+    Rgrid : array like
+        Smoothing scales, given in the same unit as the box size.
+    """
 
     def __init__(self, extrema_finder, Rgrid):
         if not issubclass(type(extrema_finder), ExtremaFinder):
@@ -60,6 +64,7 @@ class SloppingSaddle(object):
         pos_keys = ['x', 'y', 'z'][:ndim]
 
         all_ext = []
+        logger.debug('Building trees')
         for iR, R in enumerate(tqdm(smoothing_scales, desc='Building trees')):
             ext = self.ef.find_extrema(R).as_dataframe()
             ext['iR'] = iR
@@ -71,6 +76,7 @@ class SloppingSaddle(object):
         ds['head'] = True
         ds = ds.reset_index().set_index(['iR', 'kind'])
 
+        logger.debug('Locating heads')
         # Find all points that do not have a successor at a larger
         # smoothing scales ("heads")
         for kind in tqdm(range(ndim+1), leave=False):
@@ -123,6 +129,7 @@ class SloppingSaddle(object):
         u1 = []
         dist = []
 
+        logger.debug('Locating critical events')
         for iR in tqdm(range(len(smoothing_scales)-iRw+1), leave=False):
             trees = {}
             slice_R = slice(iR, iR+iRw)
@@ -170,6 +177,7 @@ class SloppingSaddle(object):
         p1 = h0[pos_keys].values
         p2 = h1[pos_keys].values
 
+        logger.debug('Computing critical point properties')
         data = {}
         for col in h0.columns:
             if h0[col].dtype == int:

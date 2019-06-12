@@ -152,7 +152,35 @@ def cleanup_pairs_N2(xyz, kind, data_shape):
 
 
 class ExtremaFinder(object):
-    """A class to smooth an extract extrema from a n-dimensional field."""
+    """A class to smooth an extract extrema from a n-dimensional field.
+
+    Parameters
+    ----------
+    data : n-dimensional array
+        The input field as a ndim array.
+    boxlen : float
+        Size of the box. All scales are then given in the same unit as boxlen.
+    cache_len : int, optional
+        Size of the cache containing the smoothed field. Defaults to 2.
+    clean_pairs_method : str, optional
+        The method used to discard close extrema. Defaults to 'KDTree'.
+        See notes.
+    nthreads : int
+        Number of threads to use for FFT, etc.
+    logleve : int
+        Set to a low value for more verbosity
+
+    Notes
+    -----
+    When discarding extrema, there are three methods available:
+    * 'none': do not discard close extrema
+    * 'direct': use an approach based on the relative distance between extrema.
+                This scales as N^2 where N is the number of extrema.
+    * 'KDTree': same as previous but using a KDTree, resulting in better perfs
+                for large number of extrema.
+    The default option gives the best result for large number of extrema.
+    If the number of extrema is small, switch back to the 'direct' method.
+    """
 
     ndim = None    # Number of dimensions
     boxlen = None  # Size of the box in physical units
@@ -172,7 +200,7 @@ class ExtremaFinder(object):
 
     FFT_args = None
 
-    def __init__(self, data, cache_len=20, clean_pairs_method='KDTree',
+    def __init__(self, data, cache_len=2, clean_pairs_method='KDTree',
                  nthreads=1, loglevel=None, boxlen=1):
 
         self.registry = reg = UnitRegistry()
