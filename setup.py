@@ -11,7 +11,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='py_extrema',
-    version='0.0.1',
+    version='0.0.2',
     description='Find extrema using python.',
     classifiers=[
         'Development status :: 1 - Alpha',
@@ -25,7 +25,12 @@ setup(
     install_requires=[
         'numpy',
         'numba',
-        'unyt'
+        'unyt',
+        'scipy',
+        'pandas',
+        'pyfftw',
+        'tqdm',
+        'numexpr'
     ],
     include_package_data=True
 )
