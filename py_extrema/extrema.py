@@ -114,6 +114,8 @@ def cleanup_pairs_KDTree(xyz, kind, data_shape, dmin, grad):
     # TODO: support non square domains
     if not np.all(np.asarray(data_shape) == data_shape[0]):
         raise Exception('All axis should have the same dimension.')
+    if len(xyz) == 0:
+        return np.ones(0, dtype=bool)
     tree = KDTree(xyz, boxsize=data_shape[0], copy_data=True)
     pairs = tree.query_pairs(dmin, p=np.inf, output_type='ndarray')
     logger.debug('Removing close pairs')

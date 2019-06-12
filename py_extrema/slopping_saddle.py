@@ -58,7 +58,7 @@ class SloppingSaddle(object):
         ndim = self.ef.ndim
 
         # Extract relevant information from dsx
-        dimensions = self.ef.data.shape[0]
+        dimensions = self.ef.data_raw.shape[0]
         smoothing_scales = self.Rgrid.to('pixel').value
 
         pos_keys = ['x', 'y', 'z'][:ndim]
@@ -83,8 +83,8 @@ class SloppingSaddle(object):
             for iR in range(1, len(smoothing_scales)):
                 if not ((iR, kind) in ds.index and (iR-1, kind) in ds.index):
                     continue
-                p1 = ds.loc[(iR-1, kind), pos_keys].values
-                p2 = ds.loc[(iR,   kind), pos_keys].values
+                p1 = ds.loc[(iR-1, kind), pos_keys].values % dimensions
+                p2 = ds.loc[(iR,   kind), pos_keys].values % dimensions
 
                 # Find elements of p2 in p1 (all should match!)
                 t = cKDTree(p1, boxsize=dimensions)
@@ -143,6 +143,8 @@ class SloppingSaddle(object):
                     p = heads.loc[(slice_R, kind), pos_keys + ['R']].values
                     boxsize = [dimensions]*ndim + [smoothing_scales[-1]*100]
                 if len(p) > 0:
+                    # Wrap dimensions to prevent negative inputs
+                    p = p % dimensions
                     trees[kind] = cKDTree(p, boxsize=boxsize)
             for kind in range(ndim):
                 uid0, uid1, d = kind_iter(iR, kind, kind+1, trees, slice_R)
@@ -199,3 +201,4 @@ class SloppingSaddle(object):
         critical_events = pd.DataFrame(data)
 
         self.critical_events = critical_events
+        return self.critical_events
