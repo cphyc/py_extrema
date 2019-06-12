@@ -12,7 +12,7 @@ URL = 'https://github.com/cphyc/py_extrema'
 EMAIL = 'contact@cphyc.me'
 AUTHOR = 'Corentin Cadiou'
 REQUIRES_PYTHON = '>=3.6.0'
-VERSION = '0.0.3'
+VERSION = '0.0.3b'
 
 # What packages are required for this module to be executed?
 REQUIRED = [
