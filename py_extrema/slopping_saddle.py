@@ -1,4 +1,4 @@
-from scipy.spatial import cKDTree as KDTree
+from scipy.spatial import cKDTree
 from py_extrema.extrema import ExtremaFinder
 import numpy as np
 from tqdm.autonotebook import tqdm
@@ -35,187 +35,159 @@ class SloppingSaddle(object):
 
         return center % boxlen
 
-    @property
-    def trees(self):
-        if hasattr(self, '_trees'):
-            return self._trees
+    def detect_extrema(self, iRw=1):
+        '''Compute the critical events found in a dataset.
+
+        Parameters
+        ----------
+        iRw : int, default 1
+            The thickness in smoothing scale dimension to look for critical
+            points pair. See notes.
+        ndim : int, optional, default 3
+
+        Notes
+        -----
+        The algorithm first computes "heads" (critical points with no successor
+        at next smoothing scale). It then tries to find pairs of heads of
+        consecutive kind (e.g. peaks with filaments) between R[i] and R[i+iRw].
+        '''
         ndim = self.ef.ndim
-        boxsize = self.ef.data_shape[0]
-        Rgrid = self.Rgrid.to('pixel').value
-        trees = {
-            kind: {
-                iR: None
-                for iR, _ in enumerate(Rgrid)
-            } for kind in range(ndim+1)}
 
-        for iR, R in enumerate(tqdm(Rgrid, desc='Building trees')):
+        # Extract relevant information from dsx
+        dimensions = self.ef.data.shape[0]
+        smoothing_scales = self.Rgrid.to('pixel').value
+
+        pos_keys = ['x', 'y', 'z'][:ndim]
+
+        all_ext = []
+        for iR, R in enumerate(tqdm(smoothing_scales, desc='Building trees')):
             ext = self.ef.find_extrema(R).as_dataframe()
-            for k in range(ndim+1):
-                mask = (ext.kind == k)
-                keys = get_xyz_keys(ndim)
-                pos = ext.loc[mask, keys].values
-                trees[k][iR] = ExtrData(
-                    tree=KDTree(np.mod(pos, boxsize),
-                                boxsize=boxsize),
-                    data=ext.loc[mask])
+            ext['iR'] = iR
+            all_ext.append(ext)
 
-        self._trees = trees
-        return self._trees
+        # Build the dataframe containting the extrema
+        ds = pd.concat(all_ext)
+        ds['uid'] = np.arange(len(ds))
+        ds['head'] = True
+        ds = ds.reset_index().set_index(['iR', 'kind'])
 
-    def detect_extrema(self):
-        Ndim = self.ef.ndim
-        trees = self.trees
+        # Find all points that do not have a successor at a larger
+        # smoothing scales ("heads")
+        for kind in tqdm(range(ndim+1), leave=False):
+            for iR in range(1, len(smoothing_scales)):
+                if not ((iR, kind) in ds.index and (iR-1, kind) in ds.index):
+                    continue
+                p1 = ds.loc[(iR-1, kind), pos_keys].values
+                p2 = ds.loc[(iR,   kind), pos_keys].values
 
-        # Compute cross tree distances. Slopping saddle are found where
-        # the closest point is of different kind.
-        ss_points = []
-        Rgrid = self.Rgrid.to('pixel').value
-        keys = ['dens']
-        for i in range(Ndim):
-            keys.append(f'l{i+1}')
-            for j in range(i, Ndim):
-                keys.append(f'h{i+1}{j+1}')
+                # Find elements of p2 in p1 (all should match!)
+                t = cKDTree(p1, boxsize=dimensions)
 
-        for iR, R in enumerate(tqdm(Rgrid[:-1],
-                                    desc='Finding s. saddle')):
-            pairs = {}
-            ss_points_data = {}
-            for kind in range(Ndim):
-                # Here we compare the distance from the current critical points
-                # to points at the next smoothing scale and next kind
-                # of critical points. There are two possibilities:
-                # 1. there is one critical point at the next smoothing scale:
-                #    the critical point subsists
-                # 2. there is one critical point _of another kind_ at
-                #    the current scale: the critical point disappears
-                t = trees[kind][iR].tree
-                ind_mine = np.arange(len(t.data), dtype=int)
+                d, iprev = t.query(
+                    p2,
+                    distance_upper_bound=smoothing_scales[iR])
+                ok = np.isfinite(d)
+                head = np.ones(p1.shape[0], dtype=bool)
+                head[iprev[ok]] = False
 
-                # Compute smallest distance to same kind at next
-                # smoothing scale
-                tnextR = trees[kind][iR + 1].tree
-                dnextR, inextR = tnextR.query(
-                    t.data, distance_upper_bound=2*R)
+                ds.loc[(iR-1, kind), 'head'] = head
 
-                # Compute distance to other critical points
-                tnext = trees[kind + 1][iR].tree
-                dnext, inext = tnext.query(t.data,
-                                           distance_upper_bound=2*R)
+        # Build a tree out of the different heads
+        heads = ds[ds['head']]
 
-                # Check :
-                # * there is no crit. pt. of same kind within a few dR
-                # * there is a crit. pt. at same scale of next kind
-                #   (e.g. saddle point-peak)
-                # mask_prev = (dprev < dnextR) & (dprev < dnext) \
-                #   & np.isfinite(dprev)
-                mask_next = ((dnext < dnextR) & np.isfinite(dnext))
+        pairs = []
+        skip_uid = set()
 
-                # Store pair information for later use
-                pairs[kind] = (ind_mine[mask_next], inext[mask_next],
-                               dnext[mask_next])
+        def kind_iter(iR, k0, k1, trees, slice_R):
+            # Helper function that computes pairs of head
+            h0 = heads.loc[(slice_R, k0), slice(None)]
+            h1 = heads.loc[(slice_R, k1), slice(None)]
+            if iRw == 1:
+                p0 = h0[pos_keys].values
+            else:
+                p0 = h0[pos_keys + ['R']].values
 
-                ##################################################
-                # Compute position -- next
-                new_ss_pos = self.compute_middle(
-                    t.data[mask_next],
-                    tnext.data[inext[mask_next]])
+            if len(h0) == 0 or len(h1) == 0:
+                return [], [], []
 
-                # Compute data
-                A = trees[kind][iR].data.loc[mask_next][keys]
-                B = trees[kind + 1][iR].data.iloc[inext[mask_next]][keys]
+            t1 = trees[k1]
 
-                datacur = A.values
-                dataprev = B.values
+            d, inext = t1.query(p0, distance_upper_bound=smoothing_scales[iR])
+            ok = inext < len(t1.data)
+            uid0 = h0[ok].uid.values
+            uid1 = h1.iloc[inext[ok]]['uid'].values
+            uids = np.sort(np.array((uid0, uid1)), axis=0)
+            return uids[0], uids[1], d[ok] / smoothing_scales[iR]
 
-                new_data = (datacur + dataprev) / 2
+        u0 = []
+        u1 = []
+        dist = []
 
-                # Compute hessian at the position of the s.saddle
-                hess = measure_hessian(new_ss_pos, self.ef.smooth(R))
-                for i in range(Ndim):
-                    for j in range(i, Ndim):
-                        k = f'h{i+1}{j+1}'
-                        ii = keys.index(k)
-                        new_data[:, ii] = hess[:, i, j]
+        for iR in tqdm(range(len(smoothing_scales)-iRw+1), leave=False):
+            trees = {}
+            slice_R = slice(iR, iR+iRw)
 
-                if Ndim == 3:
-                    # Compute third derivative in eigenframe
-                    _, evals = np.linalg.eigh(hess)
-                    # Roll the vanishing eigenvalue to place zero
-                    evals = np.roll(evals, 1+kind, axis=-1)
-                    third_deriv = measure_third_derivative(
-                        new_ss_pos, self.ef.smooth(R), evals)
+            # Look once in each direction (+kind, -kind)
+            for kind in range(ndim+1):
+                if iRw == 1:
+                    p = heads.loc[(slice_R, kind), pos_keys].values
+                    boxsize = [dimensions]*ndim
                 else:
-                    third_deriv = np.zeros((len(new_ss_pos), Ndim)) * np.nan
+                    p = heads.loc[(slice_R, kind), pos_keys + ['R']].values
+                    boxsize = [dimensions]*ndim + [smoothing_scales[-1]*100]
+                if len(p) > 0:
+                    trees[kind] = cKDTree(p, boxsize=boxsize)
+            for kind in range(ndim):
+                uid0, uid1, d = kind_iter(iR, kind, kind+1, trees, slice_R)
+                u0.extend(uid0)
+                u1.extend(uid1)
+                dist.extend(d)
 
-                # Copy new data in
-                tmp = []
-                for ii, pos in enumerate(new_ss_pos):
-                    tmp.append((kind, iR+1, R, *new_data[ii, :],
-                               *third_deriv[ii, :], *pos))
-                ss_points_data[kind] = tmp
+                uid0, uid1, d = kind_iter(iR, ndim-kind, ndim-kind-1, trees, slice_R)
+                u0.extend(uid0)
+                u1.extend(uid1)
+                dist.extend(d)
 
-            # We may have counted twice some points
-            keep = {k: np.ones(len(v), dtype=bool)
-                    for k, v in ss_points_data.items()}
-            for kind in range(Ndim-1):
-                _, i1, d1 = pairs[kind]
-                i2, _, d2 = pairs[kind+1]
+        # Sort by increasing distances
+        order = np.argsort(dist)
+        u0 = np.array(u0)[order]
+        u1 = np.array(u1)[order]
+        dist = np.array(dist)[order]
 
-                order1 = np.argsort(i1)
-                order2 = np.argsort(i2)
+        # Select each uid only once
+        for uid0, uid1, d in zip(u0, u1, dist):
+            if uid0 not in skip_uid or uid1 not in skip_uid and d < 1.5:
+                pairs.append((uid0, uid1))
+                skip_uid.add(uid0)
+                skip_uid.add(uid1)
 
-                d1o = d1[order1]
-                d2o = d2[order2]
+        # Given the merging pairs, compute the critical events
+        uids = np.array(pairs).T
+        ds_by_uid = ds.reset_index().set_index('uid')
 
-                # Find elements in both sets and eventually discard them
-                # now i1[ind1] and i2[ind2] are the same set
-                icommon = np.intersect1d(i1, i2)
-                ind1 = np.searchsorted(i1, icommon, sorter=order1)
-                ind2 = np.searchsorted(i2, icommon, sorter=order2)
+        h0 = ds_by_uid.loc[uids[0]]
+        h1 = ds_by_uid.loc[uids[1]]
+        p1 = h0[pos_keys].values
+        p2 = h1[pos_keys].values
 
-                m = np.ones_like(i1, dtype=bool)
-                m[ind1] = d1o[ind1] < d2o[ind2]
-                keep[kind  ][order1] = m
+        data = {}
+        for col in h0.columns:
+            if h0[col].dtype == int:
+                data[col] = (h0[col].values + h1[col].values) // 2
+            else:
+                data[col] = (h0[col].values + h1[col].values) / 2
+        data['kind'] = (h0['kind'].values + h1['kind'].values - 1)//2
+        L = dimensions
+        # Compute position accounting for periodic boundaries
+        pp = np.where(p1-p2 > L/2, (p1+p2-L)/2,
+                      np.where(p1-p2 < -L/2,
+                               (p1+p2+L)/2,
+                               (p1+p2)/2))
 
-                m = np.ones_like(i2, dtype=bool)
-                m[ind2] = d2o[ind2] < d1o[ind1]
-                keep[kind+1][order2] = m
+        # Copy positional data
+        for idim, pk in enumerate(pos_keys):
+            data[pk] = pp[:, idim]
 
-            for kind in range(Ndim):
-                ss_points.extend(
-                    (_ for i, _ in enumerate(ss_points_data[kind])
-                     if keep[kind][i]))
+        critical_events = pd.DataFrame(data)
 
-        Fxkeys = [f'Fx{i+1}{i+1}' for i in range(Ndim)]
-        names = ['kind', 'iR', 'R'] + keys + Fxkeys
-        names.extend(get_xyz_keys(Ndim))
-
-        # Critical points of kind 1..ndim-1 are counted twice, so we have to
-        # remove them
-        logger.debug('Discarding double counts')
-        boxsize = self.ef.data_shape[0]
-        ret = pd.DataFrame(ss_points, columns=names)
-        ret['keep'] = True
-
-        Ndiscard = 0
-        for kind in range(Ndim):
-            selection = (ret.kind == kind)
-            keys = get_xyz_keys(Ndim)
-            pos = ret.loc[selection, keys + ['iR']].values % boxsize
-            tree = KDTree(pos, boxsize=boxsize)
-            discard_ids = np.unique(tree.query_pairs(
-                r=1.1, output_type='ndarray', p=np.inf)[:, 1])
-
-            keep = np.ones(pos.shape[0], dtype=bool)
-            keep[discard_ids] = False
-
-            Ndiscard += len(discard_ids)
-            ret.loc[selection, 'keep'] = keep
-
-        logger.info(f'Discarding {Ndiscard}/{len(ret)} points')
-
-        self.slopping_saddle = ret[ret.keep]
-
-        # self.slopping_saddle = pd.DataFrame(ss_points,
-        #                                     columns=names)
-        return self.slopping_saddle
+        self.critical_events = critical_events
