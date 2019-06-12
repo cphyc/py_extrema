@@ -17,7 +17,9 @@ setup(
         'Development Status :: 4 - Beta',
         'License :: OSI Approved :: CEA CNRS Inria Logiciel Libre License, version 2.1 (CeCILL-2.1)',
         'Programming Language :: Python',
-        'Topic :: Gaussian Random Field'
+        'Topic :: Scientific/Engineering :: Astronomy',
+        'Topic :: Scientific/Engineering :: Physics',
+        'Topic :: Scientific/Engineering :: Information Analysis'
     ],
     author='Corentin Cadiou',
     author_email='contact@cphyc.me',
