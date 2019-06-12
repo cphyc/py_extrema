@@ -68,6 +68,7 @@ class SloppingSaddle(object):
         for iR, R in enumerate(tqdm(smoothing_scales, desc='Building trees')):
             ext = self.ef.find_extrema(R).as_dataframe()
             ext['iR'] = iR
+            ext['R'] = R
             all_ext.append(ext)
 
         # Build the dataframe containting the extrema
