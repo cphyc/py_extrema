@@ -14,8 +14,8 @@ setup(
     version='0.0.2',
     description='Find extrema using python.',
     classifiers=[
-        'Development status :: 1 - Alpha',
-        'License :: CC-By-SA2.0',
+        'Development Status :: 4 - Beta',
+        'License :: OSI Approved :: CEA CNRS Inria Logiciel Libre License, version 2.1 (CeCILL-2.1)',
         'Programming Language :: Python',
         'Topic :: Gaussian Random Field'
     ],
