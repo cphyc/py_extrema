@@ -9,8 +9,8 @@ from .extrema import logger
 from .utils import measure_hessian, measure_third_derivative, get_xyz_keys
 
 
-class SloppingSaddle(object):
-    """A class to detect slopping saddle point by successive smoothing.
+class CriticalEvents(object):
+    """A class to detect critical events by successive smoothing.
 
     Parameters
     ----------
@@ -39,7 +39,7 @@ class SloppingSaddle(object):
 
         return center % boxlen
 
-    def detect_extrema(self, iRw=1):
+    def detect_events(self, iRw=1):
         '''Compute the critical events found in a dataset.
 
         Parameters
