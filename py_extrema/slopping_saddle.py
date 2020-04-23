@@ -107,8 +107,12 @@ class SloppingSaddle(object):
 
         def kind_iter(iR, k0, k1, trees, slice_R):
             # Helper function that computes pairs of head
-            h0 = heads.loc[(slice_R, k0), slice(None)]
-            h1 = heads.loc[(slice_R, k1), slice(None)]
+            try:
+                h0 = heads.loc[(slice_R, k0), slice(None)]
+                h1 = heads.loc[(slice_R, k1), slice(None)]
+            except KeyError:
+                return [], [], []
+
             if iRw == 1:
                 p0 = h0[pos_keys].values
             else:
@@ -131,18 +135,21 @@ class SloppingSaddle(object):
         dist = []
 
         logger.debug('Locating critical events')
-        for iR in tqdm(range(len(smoothing_scales)-iRw+1), leave=False):
+        for iR in tqdm(range(len(smoothing_scales)-iRw+1)):
             trees = {}
             slice_R = slice(iR, iR+iRw)
 
             # Look once in each direction (+kind, -kind)
             for kind in range(ndim+1):
-                if iRw == 1:
-                    p = heads.loc[(slice_R, kind), pos_keys].values
-                    boxsize = [dimensions]*ndim
-                else:
-                    p = heads.loc[(slice_R, kind), pos_keys + ['R']].values
-                    boxsize = [dimensions]*ndim + [smoothing_scales[-1]*100]
+                try:
+                    if iRw == 1:
+                        p = heads.loc[(slice_R, kind), pos_keys].values
+                        boxsize = [dimensions]*ndim
+                    else:
+                        p = heads.loc[(slice_R, kind), pos_keys + ['R']].values
+                        boxsize = [dimensions]*ndim + [smoothing_scales[-1]*100]
+                except KeyError:
+                    p = []
                 if len(p) > 0:
                     # Wrap dimensions to prevent negative inputs
                     p = p % dimensions
