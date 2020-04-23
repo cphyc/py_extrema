@@ -437,12 +437,13 @@ class ExtremaFinder(object):
         # shape (npoint, )
         kind0 = (eigvals0 > 0).sum(axis=1)
 
-        logger.info('Found %s extrema.', len(kind0))
+        logger.debug('Found %s extrema before cleanup.', len(kind0))
         logger.debug('Cleaning up pairs with method %s',
                      self.clean_pairs_method)
 
         # Remove duplicate points
         mask = self.clean_pairs(xyz0, kind0, grad0)
+        logger.info('Found %s extrema.', mask.sum())
 
         # Add units
         pos = self.array(xyz0[mask], 'pixel')
