@@ -290,7 +290,10 @@ class ExtremaFinder(object):
             return self.data_smooth[R]
 
         logger.debug('Smoothing at scale %.3f', R)
-        data_f = self.data_raw_f * np.exp(-self.k2 * R**2 / 2)
+        if R > 0:
+            data_f = self.data_raw_f * np.exp(-self.k2 * R**2 / 2)
+        else:
+            data_f = self.data_raw_f.copy()
         self.data_smooth_f[R] = data_f
         self.data_smooth[R] = fft.irfftn(data_f, **self.FFT_args)
         return self.data_smooth[R]
