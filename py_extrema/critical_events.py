@@ -77,17 +77,16 @@ class CriticalEvents(object):
         ds['head'] = True
         ds = ds.reset_index().set_index(['iR', 'kind'])
 
-        logger.debug('Locating heads')
-        # Find all points that do not have a successor at a larger
-        # smoothing scales ("heads")
+        logger.debug('Locating heads and tails')
         for kind in tqdm(range(ndim+1), leave=False):
+            # Find all points that do not have a successor at a larger
+            # smoothing scales ("heads")
             for iR in range(1, len(smoothing_scales)):
                 if not ((iR, kind) in ds.index and (iR-1, kind) in ds.index):
                     continue
                 p1 = ds.loc[(iR-1, kind), pos_keys].values % dimensions
                 p2 = ds.loc[(iR,   kind), pos_keys].values % dimensions
 
-                # Find elements of p2 in p1 (all should match!)
                 t = cKDTree(p1, boxsize=dimensions)
 
                 d, iprev = t.query(
@@ -98,6 +97,7 @@ class CriticalEvents(object):
                 head[iprev[ok]] = False
 
                 ds.loc[(iR-1, kind), 'head'] = head
+        self._ds = ds
 
         # Build a tree out of the different heads
         heads = ds[ds['head']]

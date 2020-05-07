@@ -290,7 +290,10 @@ class ExtremaFinder(object):
             return self.data_smooth[R]
 
         logger.debug('Smoothing at scale %.3f', R)
-        data_f = self.data_raw_f * np.exp(-self.k2 * R**2 / 2)
+        if R > 0:
+            data_f = self.data_raw_f * np.exp(-self.k2 * R**2 / 2)
+        else:
+            data_f = self.data_raw_f.copy()
         self.data_smooth_f[R] = data_f
         self.data_smooth[R] = fft.irfftn(data_f, **self.FFT_args)
         return self.data_smooth[R]
@@ -434,12 +437,13 @@ class ExtremaFinder(object):
         # shape (npoint, )
         kind0 = (eigvals0 > 0).sum(axis=1)
 
-        logger.info('Found %s extrema.', len(kind0))
+        logger.debug('Found %s extrema before cleanup.', len(kind0))
         logger.debug('Cleaning up pairs with method %s',
                      self.clean_pairs_method)
 
         # Remove duplicate points
         mask = self.clean_pairs(xyz0, kind0, grad0)
+        logger.info('Found %s extrema.', mask.sum())
 
         # Add units
         pos = self.array(xyz0[mask], 'pixel')
