@@ -23,7 +23,8 @@ REQUIRED = [
     'pandas',
     'pyfftw',
     'tqdm',
-    'numexpr'
+    'numexpr',
+    'attrs'
 ]
 
 # What packages are optional?
