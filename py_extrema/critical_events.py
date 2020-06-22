@@ -39,7 +39,14 @@ class CriticalEvents(object):
 
         return center % boxlen
 
-    def detect_events(self, iRw=1):
+    @property
+    def critical_points(self):
+        if hasattr(self, '_ds'):
+            return self._ds
+        else:
+            raise Exception('You need to generate the critical point first, e.g. using .detect_events()')
+
+    def detect_events(self, iRw=1, store_predecessor=False):
         '''Compute the critical events found in a dataset.
 
         Parameters
@@ -47,7 +54,8 @@ class CriticalEvents(object):
         iRw : int, default 1
             The thickness in smoothing scale dimension to look for critical
             points pair. See notes.
-        ndim : int, optional, default 3
+        store_predecessor : bool, default False
+            If True, store the predecessor of each critical point in the three.
 
         Notes
         -----
@@ -76,6 +84,8 @@ class CriticalEvents(object):
         ds['uid'] = np.arange(len(ds))
         ds['head'] = True
         ds = ds.reset_index().set_index(['iR', 'kind'])
+        if store_predecessor:
+            ds['uid_prev'] = -1
 
         logger.debug('Locating heads and tails')
         for kind in tqdm(range(ndim+1), leave=False):
@@ -93,6 +103,10 @@ class CriticalEvents(object):
                     p2,
                     distance_upper_bound=smoothing_scales[iR])
                 ok = np.isfinite(d)
+
+                if store_predecessor:
+                    ds.loc[(iR, kind), 'uid_prev'] = np.where(ok, iprev, -1)
+                
                 head = np.ones(p1.shape[0], dtype=bool)
                 head[iprev[ok]] = False
 
