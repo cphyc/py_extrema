@@ -105,7 +105,10 @@ class CriticalEvents(object):
                 ok = np.isfinite(d)
 
                 if store_predecessor:
-                    ds.loc[(iR, kind), 'uid_prev'] = np.where(ok, iprev, -1)
+                    uid_Rm1 = ds.loc[(iR-1, kind), 'uid']
+                    tmp = np.full(len(p2), -1)
+                    tmp[ok] = uid_Rm1[iprev[ok]]
+                    ds.loc[(iR, kind), 'uid_prev'] = tmp
                 
                 head = np.ones(p1.shape[0], dtype=bool)
                 head[iprev[ok]] = False
