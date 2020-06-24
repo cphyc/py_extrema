@@ -159,13 +159,13 @@ def trilinear_interpolation(pos, v, ret):
     x = (xr, xl)
     y = (yr, yl)
     z = (zr, zl)
-    ret[...] = 0
+    ret[:] = 0
 
     for i in range(2):
         for j in range(2):
             for k in range(2):
                 vol = x[i] * y[j] * z[k]
-                ret[...] += v[..., i, j, k] * vol
+                ret[:] += v[:, i, j, k] * vol
 
 
 @njit
