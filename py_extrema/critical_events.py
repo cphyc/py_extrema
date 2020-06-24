@@ -161,7 +161,7 @@ class CriticalEvents(object):
             uid0 = h0[ok].uid.values
             uid1 = h1.iloc[inext[ok]]['uid'].values
             uids = np.sort(np.array((uid0, uid1)), axis=0)
-            return uids[0], uids[1], list(dist[ok] / smoothing_scales[iR])
+            return uids[0], uids[1], dist[ok] / smoothing_scales[iR]
 
         u0 = []
         u1 = []
@@ -185,15 +185,15 @@ class CriticalEvents(object):
                     p = p % dimensions
                     trees[kind] = cKDTree(p, boxsize=boxsize)
             for kind in range(ndim):
-                uid0, uid1, dist = kind_iter(iR, kind, kind+1, trees, slice_R)
+                uid0, uid1, d = kind_iter(iR, kind, kind+1, trees, slice_R)
                 u0.extend(uid0)
                 u1.extend(uid1)
-                dist.extend(dist)
+                dist.extend(d)
 
-                uid0, uid1, dist = kind_iter(iR, ndim-kind, ndim-kind-1, trees, slice_R)
+                uid0, uid1, d = kind_iter(iR, ndim-kind, ndim-kind-1, trees, slice_R)
                 u0.extend(uid0)
                 u1.extend(uid1)
-                dist.extend(dist)
+                dist.extend(d)
 
         # Sort by increasing distances
         order = np.argsort(dist)
