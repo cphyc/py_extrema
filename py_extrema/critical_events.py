@@ -104,33 +104,34 @@ class CriticalEvents(object):
                     distance_upper_bound=smoothing_scales[iR])
                 ok = np.isfinite(dist)
 
-                # We only want a point in p1 to be associated to at most one point in p2,
-                # so we have to check for unicity
-
                 # To do so, we sort the distances by *decreasing* order and update the predecessor
                 # array, eventually overwriting
                 N1, N2 = len(p1), len(p2)
-                ind1 = np.arange(N1)
                 ind2 = np.arange(N2)
-                inext = np.full(N1, -1)
+
+                # Sort by decreasing distance
                 d_order = np.argsort(-dist)
                 ind2_s = ind2[d_order]
                 iprev_s = iprev[d_order]
                 ok_s = ok[d_order]
 
+                iprev_no_double = np.full(N2, fill_value=N1, dtype=int)
+                inext = np.full(N1, fill_value=N2, dtype=int)
                 inext[iprev_s[ok_s]] = ind2_s[ok_s]
+                mask1 = np.full(N2, False, dtype=bool)
+                mask1[inext[inext < N2]] = True
 
-                mask = np.full(N2, False, dtype=bool)
-                mask[inext] = True
+                ok = mask1
 
-                if store_predecessor:
-                    uid_Rm1 = ds.loc[(iR-1, kind), 'uid']
-                    tmp = np.full(N2, -1)
-                    tmp[mask] = uid_Rm1[iprev[mask]]
-                    ds.loc[(iR, kind), 'uid_prev'] = tmp
-                
-                head = np.ones(p1.shape[0], dtype=bool)
-                head[iprev[mask]] = False
+                # We only want a point in p1 to be associated to at most one point in p2,
+                # so we have to check for unicity
+                uid1 = ds.loc[(iR-1, kind), 'uid']
+                tmp_uid2 = np.full(N2, -1)
+                tmp_uid2[ok] = uid1[iprev[ok]]
+                ds.loc[(iR, kind), 'uid_prev'] = tmp_uid2
+
+                head = np.full(p1.shape[0], True, dtype=bool)
+                head[iprev[ok]] = False
 
                 ds.loc[(iR-1, kind), 'head'] = head
         self._ds = ds
@@ -208,11 +209,11 @@ class CriticalEvents(object):
                 skip_uid.add(uid1)
 
         # Given the merging pairs, compute the critical events
-        uids = np.array(pairs).T
+        uids = np.array(pairs)
         ds_by_uid = ds.reset_index().set_index('uid')
 
-        h0 = ds_by_uid.loc[uids[0]]
-        h1 = ds_by_uid.loc[uids[1]]
+        h0 = ds_by_uid.loc[uids[:, 0]]
+        h1 = ds_by_uid.loc[uids[:, 1]]
         p1 = h0[pos_keys].values
         p2 = h1[pos_keys].values
 
