@@ -209,11 +209,11 @@ class CriticalEvents(object):
                 skip_uid.add(uid1)
 
         # Given the merging pairs, compute the critical events
-        uids = np.array(pairs)
+        uids = np.asarray(pairs).T
         ds_by_uid = ds.reset_index().set_index('uid')
 
-        h0 = ds_by_uid.loc[uids[:, 0]]
-        h1 = ds_by_uid.loc[uids[:, 1]]
+        h0 = ds_by_uid.loc[uids[0]]
+        h1 = ds_by_uid.loc[uids[1]]
         p1 = h0[pos_keys].values
         p2 = h1[pos_keys].values
 
