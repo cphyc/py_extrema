@@ -46,7 +46,7 @@ class CriticalEvents(object):
         else:
             raise Exception('You need to generate the critical point first, e.g. using .detect_events()')
 
-    def detect_events(self, iRw=1, store_predecessor=False):
+    def detect_events(self, iRw=1, store_predecessor=True):
         '''Compute the critical events found in a dataset.
 
         Parameters
@@ -99,19 +99,38 @@ class CriticalEvents(object):
 
                 t = cKDTree(p1, boxsize=dimensions)
 
-                d, iprev = t.query(
+                dist, iprev = t.query(
                     p2,
                     distance_upper_bound=smoothing_scales[iR])
-                ok = np.isfinite(d)
+                ok = np.isfinite(dist)
+
+                # We only want a point in p1 to be associated to at most one point in p2,
+                # so we have to check for unicity
+
+                # To do so, we sort the distances by *decreasing* order and update the predecessor
+                # array, eventually overwriting
+                N1, N2 = len(p1), len(p2)
+                ind1 = np.arange(N1)
+                ind2 = np.arange(N2)
+                inext = np.full(N1, -1)
+                d_order = np.argsort(-dist)
+                ind2_s = ind2[d_order]
+                iprev_s = iprev[d_order]
+                ok_s = ok[d_order]
+
+                inext[iprev_s[ok_s]] = ind2_s[ok_s]
+
+                mask = np.full(N2, False, dtype=bool)
+                mask[inext] = True
 
                 if store_predecessor:
                     uid_Rm1 = ds.loc[(iR-1, kind), 'uid']
-                    tmp = np.full(len(p2), -1)
-                    tmp[ok] = uid_Rm1[iprev[ok]]
+                    tmp = np.full(N2, -1)
+                    tmp[mask] = uid_Rm1[iprev[mask]]
                     ds.loc[(iR, kind), 'uid_prev'] = tmp
                 
                 head = np.ones(p1.shape[0], dtype=bool)
-                head[iprev[ok]] = False
+                head[iprev[mask]] = False
 
                 ds.loc[(iR-1, kind), 'head'] = head
         self._ds = ds
@@ -136,12 +155,12 @@ class CriticalEvents(object):
 
             t1 = trees[k1]
 
-            d, inext = t1.query(p0, distance_upper_bound=smoothing_scales[iR])
+            dist, inext = t1.query(p0, distance_upper_bound=smoothing_scales[iR])
             ok = inext < len(t1.data)
             uid0 = h0[ok].uid.values
             uid1 = h1.iloc[inext[ok]]['uid'].values
             uids = np.sort(np.array((uid0, uid1)), axis=0)
-            return uids[0], uids[1], d[ok] / smoothing_scales[iR]
+            return uids[0], uids[1], list(dist[ok] / smoothing_scales[iR])
 
         u0 = []
         u1 = []
@@ -165,15 +184,15 @@ class CriticalEvents(object):
                     p = p % dimensions
                     trees[kind] = cKDTree(p, boxsize=boxsize)
             for kind in range(ndim):
-                uid0, uid1, d = kind_iter(iR, kind, kind+1, trees, slice_R)
+                uid0, uid1, dist = kind_iter(iR, kind, kind+1, trees, slice_R)
                 u0.extend(uid0)
                 u1.extend(uid1)
-                dist.extend(d)
+                dist.extend(dist)
 
-                uid0, uid1, d = kind_iter(iR, ndim-kind, ndim-kind-1, trees, slice_R)
+                uid0, uid1, dist = kind_iter(iR, ndim-kind, ndim-kind-1, trees, slice_R)
                 u0.extend(uid0)
                 u1.extend(uid1)
-                dist.extend(d)
+                dist.extend(dist)
 
         # Sort by increasing distances
         order = np.argsort(dist)
@@ -182,8 +201,8 @@ class CriticalEvents(object):
         dist = np.array(dist)[order]
 
         # Select each uid only once
-        for uid0, uid1, d in zip(u0, u1, dist):
-            if uid0 not in skip_uid or uid1 not in skip_uid and d < 1.5:
+        for uid0, uid1, dist in zip(u0, u1, dist):
+            if uid0 not in skip_uid or uid1 not in skip_uid and dist < 1.5:
                 pairs.append((uid0, uid1))
                 skip_uid.add(uid0)
                 skip_uid.add(uid1)
