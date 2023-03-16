@@ -1,9 +1,16 @@
-from py_extrema.utils import FiniteDictionary, unravel_index, solve,\
-     trilinear_interpolation, gradient, measure_hessian, measure_gradient
-from scipy.interpolate import RegularGridInterpolator
 import numpy as np
-
 from numpy.testing import assert_allclose
+from scipy.interpolate import RegularGridInterpolator
+
+from py_extrema.utils import (
+    FiniteDictionary,
+    gradient,
+    measure_gradient,
+    measure_hessian,
+    solve,
+    trilinear_interpolation,
+    unravel_index,
+)
 
 
 def testFiniteDictionary():
@@ -105,7 +112,7 @@ def test_trilinear_interpolation_2():
     z = np.zeros_like(x)
     X = np.array([x, z, z]).T
 
-    ref = x * (vright-vleft) + vleft
+    ref = x * (vright - vleft) + vleft
     exp = trilinear_interpolation(X, data)[:, 0]
 
     assert_allclose(ref, exp)
@@ -113,14 +120,11 @@ def test_trilinear_interpolation_2():
 
 def test_measure_hessian():
     np.random.seed(16091992)
-    x, y, z = np.meshgrid(*[np.arange(-5, 6)]*3, indexing='ij')
-    data = x**2 + y**2 + z**2 + x*y + y*z + x*z
+    x, y, z = np.meshgrid(*[np.arange(-5, 6)] * 3, indexing="ij")
+    data = x**2 + y**2 + z**2 + x * y + y * z + x * z
 
     def anal_hess(x, y, z):
-        tmp = np.array(
-            [[2, 1, 1],
-             [1, 2, 1],
-             [1, 1, 2]], dtype=np.float64)
+        tmp = np.array([[2, 1, 1], [1, 2, 1], [1, 1, 2]], dtype=np.float64)
         return tmp
 
     ref = []
@@ -131,10 +135,8 @@ def test_measure_hessian():
         for j in range(2, 8):
             for k in range(2, 8):
                 all_pos.append([i, j, k])
-                X = np.array([i-5., j-5., k-5.])
-                ref.append(
-                    anal_hess(*X)
-                )
+                X = np.array([i - 5.0, j - 5.0, k - 5.0])
+                ref.append(anal_hess(*X))
 
     X = np.array(all_pos, dtype=np.float64)
     exp = measure_hessian(X, data)
@@ -144,13 +146,11 @@ def test_measure_hessian():
 
 def test_measure_gradient():
     np.random.seed(16091992)
-    x, y, z = np.meshgrid(*[np.arange(-5, 6)]*3, indexing='ij')
-    data = x**2 + y**2 + z**2 + x*y + y*z + x*z
+    x, y, z = np.meshgrid(*[np.arange(-5, 6)] * 3, indexing="ij")
+    data = x**2 + y**2 + z**2 + x * y + y * z + x * z
 
     def anal_grad(x, y, z):
-        tmp = np.array(
-            [2*x+y+z, x+2*y+z, x+y+2*z],
-            dtype=np.float64)
+        tmp = np.array([2 * x + y + z, x + 2 * y + z, x + y + 2 * z], dtype=np.float64)
         return tmp
 
     ref = []
@@ -161,10 +161,8 @@ def test_measure_gradient():
         for j in range(1, 9):
             for k in range(1, 9):
                 all_pos.append([i, j, k])
-                X = np.array([i-5., j-5., k-5.])
-                ref.append(
-                    anal_grad(*X)
-                )
+                X = np.array([i - 5.0, j - 5.0, k - 5.0])
+                ref.append(anal_grad(*X))
 
     X = np.array(all_pos, dtype=np.float64)
     exp = measure_gradient(X, data)

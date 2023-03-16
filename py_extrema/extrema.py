@@ -1,21 +1,19 @@
-import numpy as np
-from pyfftw.interfaces import numpy_fft as fft
+import logging
 
-from unyt import UnitRegistry
-import unyt as U
-from unyt import unyt_array, unyt_quantity
+import numexpr as ne
+import numpy as np
+import unyt as u
+from numba import jit, njit
+from pyfftw.interfaces import numpy_fft as fft
+from scipy.interpolate import interpn
+from scipy.spatial import cKDTree as KDTree
+from unyt import UnitRegistry, unyt_array, unyt_quantity
 from unyt.dimensions import length
 
-from numba import jit, njit
-import logging
-from scipy.spatial import cKDTree as KDTree
-from scipy.interpolate import interpn
-import numexpr as ne
-
-from .utils import FiniteDictionary, CriticalPoints, unravel_index, solve
+from .utils import CriticalPoints, FiniteDictionary, solve, unravel_index
 
 # create a logging format
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 # Create a stream handler
 handler = logging.StreamHandler()
@@ -31,7 +29,7 @@ logger.addHandler(handler)
 
 @jit
 def copy_xyz(xyz_rela):
-    '''Keep only the points found within 1pixel from their parent cell'''
+    """Keep only the points found within 1pixel from their parent cell"""
     xyz_rel = np.ascontiguousarray(xyz_rela.T)
     shape = xyz_rel.shape[1:]
 
@@ -76,12 +74,12 @@ def distance2(a, b, N):
         aa = a[i]
         bb = b[i]
         dx = aa - bb
-        if dx < -N/2:
-            d2 += (dx + N)**2
-        elif dx > N/2:
-            d2 += (dx - N)**2
+        if dx < -N / 2:
+            d2 += (dx + N) ** 2
+        elif dx > N / 2:
+            d2 += (dx - N) ** 2
         else:
-            d2 += (dx)**2
+            d2 += (dx) ** 2
     return d2
 
 
@@ -94,8 +92,8 @@ def _cleanup_pairs_KDTree(xyz, xc, kind, pairs, N, shape, grad_norm=None):
             # Keep point closest to center of cell
             _xc = xc[i]
             if grad_norm is None:
-                di = np.sum((xyz[i] - _xc)**2)
-                dj = np.sum((xyz[j] - _xc)**2)
+                di = np.sum((xyz[i] - _xc) ** 2)
+                dj = np.sum((xyz[j] - _xc) ** 2)
             else:
                 di = grad_norm[i]
                 dj = grad_norm[j]
@@ -110,18 +108,19 @@ def _cleanup_pairs_KDTree(xyz, xc, kind, pairs, N, shape, grad_norm=None):
 def cleanup_pairs_KDTree(xyz, kind, data_shape, dmin, grad):
     npoint, ndim = xyz.shape
     N = data_shape[0]
-    logger.debug('Building KDTree')
+    logger.debug("Building KDTree")
     # TODO: support non square domains
     if not np.all(np.asarray(data_shape) == data_shape[0]):
-        raise Exception('All axis should have the same dimension.')
+        raise Exception("All axis should have the same dimension.")
     if len(xyz) == 0:
         return np.ones(0, dtype=bool)
     tree = KDTree(xyz, boxsize=data_shape[0], copy_data=True)
-    pairs = tree.query_pairs(dmin, p=np.inf, output_type='ndarray')
-    logger.debug('Removing close pairs')
+    pairs = tree.query_pairs(dmin, p=np.inf, output_type="ndarray")
+    logger.debug("Removing close pairs")
     xc = np.round(xyz + 0.5) - 0.5
-    skip = _cleanup_pairs_KDTree(xyz, xc, kind, pairs, N, data_shape,
-                                 np.linalg.norm(grad, axis=1)).astype(bool)
+    skip = _cleanup_pairs_KDTree(
+        xyz, xc, kind, pairs, N, data_shape, np.linalg.norm(grad, axis=1)
+    ).astype(bool)
     return ~skip
 
 
@@ -137,7 +136,7 @@ def cleanup_pairs_N2(xyz, kind, data_shape):
         d1 = distance2(p1, ijk1, N)
         if np.all(p1 == -1):
             continue
-        for j in range(i+1, npoint):
+        for j in range(i + 1, npoint):
             p2 = xyz[j, :]
             if k1 != kind[j] or np.all(p2 == -1):
                 continue
@@ -153,7 +152,7 @@ def cleanup_pairs_N2(xyz, kind, data_shape):
                     xyz[j, :] = -1
 
 
-class ExtremaFinder(object):
+class ExtremaFinder:
     """A class to smooth an extract extrema from a n-dimensional field.
 
     Parameters
@@ -184,30 +183,40 @@ class ExtremaFinder(object):
     If the number of extrema is small, switch back to the 'direct' method.
     """
 
-    ndim = None    # Number of dimensions
+    ndim = None  # Number of dimensions
     boxlen = None  # Size of the box in physical units
-    data_smooth = None    # Cache containing the real-space smoothed fields
+    data_smooth = None  # Cache containing the real-space smoothed fields
     data_smooth_f = None  # Cache containing the Fourier-space smoothed fields
-    extrema = None        # Dictionary containing the extrema
-    data_raw = None    # Real-space raw data
+    extrema = None  # Dictionary containing the extrema
+    data_raw = None  # Real-space raw data
     data_raw_f = None  # Fourier-space raw data
 
     kgrid = None  # The grid of Fourier kx, ky, ... modes
-    k2 = None     # The grid of Fourier k^2
+    k2 = None  # The grid of Fourier k^2
 
-    clean_pairs_methods = ['KDTree', 'none', 'direct']
+    clean_pairs_methods = ["KDTree", "none", "direct"]
     clean_pairs_method = None
 
     dmin = 1  # Minimum distance between 2 points to merge them
 
     FFT_args = None
 
-    def __init__(self, data, cache_len=2, clean_pairs_method='KDTree',
-                 nthreads=1, loglevel=None, boxlen=1):
+    def __init__(
+        self,
+        data,
+        cache_len=2,
+        clean_pairs_method="KDTree",
+        nthreads=1,
+        loglevel=None,
+        boxlen=1,
+    ):
 
         self.registry = reg = UnitRegistry()
-        reg.add("pixel", base_value=float((U.Mpc * boxlen / data.shape[0]).to('m')),
-                dimensions=length)
+        reg.add(
+            "pixel",
+            base_value=float((u.Mpc * boxlen / data.shape[0]).to("m")),
+            dimensions=length,
+        )
 
         if loglevel:
             logger.setLevel(loglevel)
@@ -218,7 +227,7 @@ class ExtremaFinder(object):
         self.nthreads = nthreads
         self.clean_pairs_method = clean_pairs_method
 
-        self.FFT_args = dict(threads=nthreads)
+        self.FFT_args = {"threads": nthreads}
 
         self.data_raw = data
         self.data_shape = data.shape
@@ -235,16 +244,12 @@ class ExtremaFinder(object):
         # Initialize placeholders
         shape = list(self.data_raw.shape)
         shape_f = list(self.data_raw_f.shape)
-        self.grad = np.zeros([ndim] + shape,
-                             dtype=self.data_raw.dtype)
-        self.hess = np.zeros([ndim*(ndim+1)//2] + shape,
-                             dtype=self.data_raw.dtype)
+        self.grad = np.zeros([ndim] + shape, dtype=self.data_raw.dtype)
+        self.hess = np.zeros([ndim * (ndim + 1) // 2] + shape, dtype=self.data_raw.dtype)
         self.curvature = np.zeros(shape, dtype=self.data_raw.dtype)
 
-        self.grad_f = np.zeros([ndim] + shape_f,
-                               dtype=self.data_raw_f.dtype)
-        self.hess_f = np.zeros([ndim*(ndim+1)//2] + shape_f,
-                               dtype=self.data_raw_f.dtype)
+        self.grad_f = np.zeros([ndim] + shape_f, dtype=self.data_raw_f.dtype)
+        self.hess_f = np.zeros([ndim * (ndim + 1) // 2] + shape_f, dtype=self.data_raw_f.dtype)
 
     def array(self, value, units):
         return unyt_array(value, units, registry=self.registry)
@@ -266,16 +271,17 @@ class ExtremaFinder(object):
         (twice the info of a real), so the shape is half the input
         size.
         """
-        twopi = 2*np.pi
+        twopi = 2 * np.pi
         shape = self.data_shape
-        kall = ([np.fft.fftfreq(_)*twopi for _ in shape[:-1]] +
-                [np.fft.rfftfreq(_)*twopi for _ in shape[-1:]])
-        self.kgrid = np.asarray(np.meshgrid(*kall, indexing='ij'))
+        kall = [np.fft.fftfreq(_) * twopi for _ in shape[:-1]] + [
+            np.fft.rfftfreq(_) * twopi for _ in shape[-1:]
+        ]
+        self.kgrid = np.asarray(np.meshgrid(*kall, indexing="ij"))
         self.k2 = (self.kgrid**2).sum(axis=0)
 
     def fft_forward(self):
         """Compute the direct Fourier transform of the input data."""
-        logger.debug('Computing FFT of input with %s threads', self.nthreads)
+        logger.debug("Computing FFT of input with %s threads", self.nthreads)
         data = self.data_raw
 
         # Note: we don't use the defaults argument for the FFT as we
@@ -285,11 +291,11 @@ class ExtremaFinder(object):
     def smooth(self, R):
         """Smooth the data at scale R (in pixel unit)."""
         if isinstance(R, unyt_quantity):
-            R = float(R.to('pixel'))
+            R = float(R.to("pixel"))
         if R in self.data_smooth:
             return self.data_smooth[R]
 
-        logger.debug('Smoothing at scale %.3f', R)
+        logger.debug("Smoothing at scale %.3f", R)
         if R > 0:
             data_f = self.data_raw_f * np.exp(-self.k2 * R**2 / 2)
         else:
@@ -299,24 +305,25 @@ class ExtremaFinder(object):
         return self.data_smooth[R]
 
     def clean_pairs(self, xyz0, kind0, grad):
-        if self.clean_pairs_method == 'KDTree':
+        if self.clean_pairs_method == "KDTree":
             boxlen = self.data_raw.shape
             mask = cleanup_pairs_KDTree(
-                np.mod(xyz0, boxlen),
-                kind0, self.data_raw.shape, self.dmin, grad)
+                np.mod(xyz0, boxlen), kind0, self.data_raw.shape, self.dmin, grad
+            )
 
-        elif self.clean_pairs_method == 'direct':
+        elif self.clean_pairs_method == "direct":
             cleanup_pairs_N2(xyz0, kind0, self.data_raw.shape)
             mask = np.any(xyz0 != -1, axis=1)
 
-        elif self.clean_pairs_method == 'none':
+        elif self.clean_pairs_method == "none":
             mask = np.ones(len(xyz0), dtype=bool)
 
         else:
             raise NotImplementedError(
-                'The method %s is not implemented to clean '
-                'pairs. Available methods are %s ' %
-                (self.clean_pairs_method, self.clean_pairs_methods))
+                "The method %s is not implemented to clean "
+                "pairs. Available methods are %s "
+                % (self.clean_pairs_method, self.clean_pairs_methods)
+            )
 
         return mask
 
@@ -336,32 +343,31 @@ class ExtremaFinder(object):
         if R not in self.data_smooth_f:
             self.smooth(R)
 
-        data_f = self.data_smooth_f[R]
+        self.data_smooth_f[R]
         ndim = self.ndim
         kgrid = self.kgrid
         ihess = 0
         indices = np.zeros((ndim, ndim), dtype=int)
 
-        logger.debug('Computing hessian and gradient in Fourier space.')
+        logger.debug("Computing hessian and gradient in Fourier space.")
         # Compute hessian and gradient in Fourier space
         for idim in range(ndim):
-            k1 = kgrid[idim]
-            self.grad_f[idim, ...] = ne.evaluate('data_f * 1j * k1')
+            kgrid[idim]
+            self.grad_f[idim, ...] = ne.evaluate("data_f * 1j * k1")
             for idim2 in range(idim, ndim):
-                k2 = kgrid[idim2]
-                grad_f = self.grad_f[idim, ...]
-                self.hess_f[ihess, ...] = ne.evaluate(
-                    'grad_f * 1j * k2')
+                kgrid[idim2]
+                self.grad_f[idim, ...]
+                self.hess_f[ihess, ...] = ne.evaluate("grad_f * 1j * k2")
 
                 indices[idim, idim2] = indices[idim2, idim] = ihess
                 ihess += 1
 
-        logger.debug('Inverse FFT of gradient')
+        logger.debug("Inverse FFT of gradient")
         # Get them back in real space
-        self.grad[...] = fft.irfftn(self.grad_f, axes=range(1, ndim+1), **self.FFT_args)
-        logger.debug('Inverse FFT of hessian')
-        self.hess[...] = fft.irfftn(self.hess_f, axes=range(1, ndim+1), **self.FFT_args)
-        logger.debug('Curvature')
+        self.grad[...] = fft.irfftn(self.grad_f, axes=range(1, ndim + 1), **self.FFT_args)
+        logger.debug("Inverse FFT of hessian")
+        self.hess[...] = fft.irfftn(self.hess_f, axes=range(1, ndim + 1), **self.FFT_args)
+        logger.debug("Curvature")
         if ndim == 3:
             a = self.hess[indices[0, 0]]
             b = self.hess[indices[1, 1]]
@@ -370,15 +376,14 @@ class ExtremaFinder(object):
             e = self.hess[indices[0, 2]]
             f = self.hess[indices[1, 2]]
             self.curvature[...] = ne.evaluate(
-                'a*b*c - c*d**2 - b*e**2 + 2*d*e*f - a*f**2',
-                local_dict=dict(a=a, b=b, c=c, d=d, e=e, f=f))
+                "a*b*c - c*d**2 - b*e**2 + 2*d*e*f - a*f**2",
+                local_dict={"a": a, "b": b, "c": c, "d": d, "e": e, "f": f},
+            )
         elif ndim == 2:
             a = self.hess[indices[0, 0]]
             b = self.hess[indices[1, 1]]
             c = self.hess[indices[0, 1]]
-            self.curvature[...] = ne.evaluate(
-                'a*b - c**2',
-                local_dict=dict(a=a, b=b, c=c))
+            self.curvature[...] = ne.evaluate("a*b - c**2", local_dict={"a": a, "b": b, "c": c})
         else:
             self.curvature[...] = np.linalg.det(self.hess[indices, ...].T.copy()).T
 
@@ -393,7 +398,7 @@ class ExtremaFinder(object):
               The set of critical points found.
         """
         if isinstance(R, unyt_quantity):
-            R = float(R.to('pixel'))
+            R = float(R.to("pixel"))
         if R in self.extrema:
             return self.extrema[R]
         ndim = self.ndim
@@ -408,47 +413,46 @@ class ExtremaFinder(object):
         rhs = -self.grad
         lhs = self.hess[indices.flatten(), ...].reshape(ndim, ndim, *shape)
 
-        logger.debug('Solving linear system to find extrema')
+        logger.debug("Solving linear system to find extrema")
         # Find the location of the points (in relative coordinates)
         # shape (N, N, N, ndim)
-        xyz_rel = solve(np.asfortranarray(lhs.T),
-                        np.asfortranarray(rhs.T))
+        xyz_rel = solve(np.asfortranarray(lhs.T), np.asfortranarray(rhs.T))
 
-        logger.debug('Discarding far extrema')
+        logger.debug("Discarding far extrema")
         # shapes (npoint, ndim) & (npoint, )
         xyz0, mask0 = copy_xyz(xyz_rel)
-        mask0 = (mask0 == 1)
+        mask0 = mask0 == 1
 
         # shape (npoint)
-        dens0 = interpn([grid]*ndim, self.smooth(R), xyz0 % shape)
+        dens0 = interpn([grid] * ndim, self.smooth(R), xyz0 % shape)
 
         # shape (npoint, ndim, ndim)
         # For the interpolation, move the hessian component at the end
-        hess0 = (interpn([grid]*ndim, np.moveaxis(self.hess, 0, -1), xyz0 % shape)
-                 [..., indices]
-                 .reshape(-1, ndim, ndim))
-        grad0 = (interpn([grid]*ndim, np.moveaxis(self.grad, 0, -1), xyz0 % shape)
-                 .reshape(-1, ndim))
+        hess0 = interpn([grid] * ndim, np.moveaxis(self.hess, 0, -1), xyz0 % shape)[
+            ..., indices
+        ].reshape(-1, ndim, ndim)
+        grad0 = interpn([grid] * ndim, np.moveaxis(self.grad, 0, -1), xyz0 % shape).reshape(
+            -1, ndim
+        )
 
-        logger.debug('Computing eigenvalues')
+        logger.debug("Computing eigenvalues")
         # shape (npoint, ndim)
         eigvals0 = np.linalg.eigvalsh(hess0)
 
         # shape (npoint, )
         kind0 = (eigvals0 > 0).sum(axis=1)
 
-        logger.debug('Found %s extrema before cleanup.', len(kind0))
-        logger.debug('Cleaning up pairs with method %s',
-                     self.clean_pairs_method)
+        logger.debug("Found %s extrema before cleanup.", len(kind0))
+        logger.debug("Cleaning up pairs with method %s", self.clean_pairs_method)
 
         # Remove duplicate points
         mask = self.clean_pairs(xyz0, kind0, grad0)
-        logger.info('Found %s extrema.', mask.sum())
+        logger.info("Found %s extrema.", mask.sum())
 
         # Add units
-        pos = self.array(xyz0[mask], 'pixel')
-        hess = self.array(hess0[mask], '1/pixel**2')
-        eigvals = self.array(eigvals0[mask], '1/pixel**2')
+        pos = self.array(xyz0[mask], "pixel")
+        hess = self.array(hess0[mask], "1/pixel**2")
+        eigvals = self.array(eigvals0[mask], "1/pixel**2")
         dens = dens0[mask]
         sigma = self.smooth(R).std() * np.ones_like(dens)
 
@@ -460,7 +464,7 @@ class ExtremaFinder(object):
             hessian=hess,
             npt=mask.sum(),
             dens=dens,
-            sigma=sigma
+            sigma=sigma,
         )
 
         self.extrema[R] = data

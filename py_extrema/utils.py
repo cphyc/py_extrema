@@ -1,17 +1,19 @@
-from numba import njit, jit, guvectorize
 from collections import OrderedDict
-import numpy as np
-import numexpr as ne
-import attr
-import pandas as pd
+from dataclasses import dataclass
 from itertools import product
+
+import numexpr as ne
+import numpy as np
+import numpy.typing as npt
+import pandas as pd
+from numba import guvectorize, jit, njit
 from scipy.interpolate import RegularGridInterpolator, interpn
 
 
 class FiniteDictionary(OrderedDict):
     def __init__(self, maxlen, *args, **kwa):
         self._maxlen = maxlen
-        super(FiniteDictionary, self).__init__(*args, **kwa)
+        super().__init__(*args, **kwa)
 
     @property
     def maxlen(self):
@@ -20,7 +22,7 @@ class FiniteDictionary(OrderedDict):
     @maxlen.setter
     def maxlen(self, v):
         if v < 0:
-            raise Exception('Invalid maxlen %s', v)
+            raise Exception("Invalid maxlen %s", v)
         self._maxlen = v
 
     def __setitem__(self, k, v, *args, **kwa):
@@ -28,7 +30,7 @@ class FiniteDictionary(OrderedDict):
             # Remove oldest member
             self.popitem(False)
 
-        super(FiniteDictionary, self).__setitem__(k, v, *args, **kwa)
+        super().__setitem__(k, v, *args, **kwa)
 
     def last(self):
         return self[list(self.keys())[-1]]
@@ -36,21 +38,29 @@ class FiniteDictionary(OrderedDict):
 
 def get_xyz_keys(Ndim):
     if Ndim <= 3:
-        keys = ['x', 'y', 'z'][:Ndim]
+        keys = ["x", "y", "z"][:Ndim]
     else:
-        keys = [f'x{i+1}' for i in range(Ndim)]
+        keys = [f"x{i+1}" for i in range(Ndim)]
     return keys
 
 
-@attr.s(frozen=True)
+@dataclass(frozen=True)
 class CriticalPoints:
-    pos = attr.ib(converter=np.atleast_2d)
-    eigvals = attr.ib(converter=np.atleast_2d)
-    kind = attr.ib(converter=np.atleast_1d)
-    hessian = attr.ib(converter=np.atleast_3d)
-    npt = attr.ib(converter=int)
-    dens = attr.ib(converter=np.atleast_1d)
-    sigma = attr.ib(converter=np.atleast_1d)
+    pos: npt.NDArray[np.float_]
+    eigvals: npt.NDArray[np.float_]
+    kind: npt.NDArray[np.float_]
+    hessian: npt.NDArray[np.float_]
+    dens: npt.NDArray[np.float_]
+    sigma: npt.NDArray[np.float_]
+    npt: int
+
+    def __post_init__(self):
+        self.pos = np.atleast_2d(self.pos)
+        self.eigvals = np.atleast_2d(self.eigvals)
+        self.kind = np.atleast_1d(self.kind)
+        self.hessian = np.atleast_3d(self.hessian)
+        self.dens = np.atleast_1d(self.dens)
+        self.sigma = np.atleast_1d(self.sigma)
 
     def as_dataframe(self):
         Ndim = self.pos.shape[1]
@@ -59,13 +69,13 @@ class CriticalPoints:
         data = {}
         for i in range(Ndim):
             data[keys[i]] = self.pos[..., i]
-            data[f'l{i+1}'] = self.eigvals[..., i]
+            data[f"l{i+1}"] = self.eigvals[..., i]
 
             for j in range(i, Ndim):
-                data[f'h{i+1}{j+1}'] = self.hessian[..., i, j]
+                data[f"h{i+1}{j+1}"] = self.hessian[..., i, j]
 
-        data['kind'] = self.kind
-        data['dens'] = self.dens
+        data["kind"] = self.kind
+        data["dens"] = self.dens
         return pd.DataFrame(data)
 
 
@@ -73,7 +83,7 @@ class CriticalPoints:
 def unravel_index(index, shape):
     n = len(shape)
     result = np.zeros(n, dtype=np.int32)
-    for i in range(n-1, -1, -1):
+    for i in range(n - 1, -1, -1):
         s = shape[i]
         result[i] = index % s
         index //= s
@@ -82,57 +92,52 @@ def unravel_index(index, shape):
 
 
 def solve(A, B):
-    '''Solve the equation A*X = B.'''
+    """Solve the equation A*X = B."""
 
     N = A.shape[-1]
     if N == 2:
-        a = A[..., 0, 0]
-        b = A[..., 1, 1]
-        c = A[..., 0, 1]
+        A[..., 0, 0]
+        A[..., 1, 1]
+        A[..., 0, 1]
 
-        b1 = B[..., 0]
-        b2 = B[..., 1]
+        B[..., 0]
+        B[..., 1]
 
-        det = ne.evaluate('a*b - c**2')
+        ne.evaluate("a*b - c**2")
 
-        X = np.zeros(B.shape, order='F')
-        X[..., 0] = ne.evaluate('(b*b1 - b2*c) / det')
-        X[..., 1] = ne.evaluate('(a*b2 - b1*c) / det')
+        X = np.zeros(B.shape, order="F")
+        X[..., 0] = ne.evaluate("(b*b1 - b2*c) / det")
+        X[..., 1] = ne.evaluate("(a*b2 - b1*c) / det")
 
         return X
 
     elif N == 3:
-        a = A[..., 0, 0]
-        b = A[..., 1, 1]
-        c = A[..., 2, 2]
-        d = A[..., 0, 1]
-        e = A[..., 0, 2]
-        f = A[..., 1, 2]
+        A[..., 0, 0]
+        A[..., 1, 1]
+        A[..., 2, 2]
+        A[..., 0, 1]
+        A[..., 0, 2]
+        A[..., 1, 2]
 
-        b1 = B[..., 0]
-        b2 = B[..., 1]
-        b3 = B[..., 2]
+        B[..., 0]
+        B[..., 1]
+        B[..., 2]
 
-        d2 = d**2
-        f2 = f**2
-        e2 = e**2
+        ne.evaluate("a*b*c - a*f2 - b*e2 - c*d2 + 2*d*e*f")
 
-        det = ne.evaluate('a*b*c - a*f2 - b*e2 - c*d2 + 2*d*e*f')
-
-        X = np.zeros(B.shape, order='F')
-        X[..., 0] = ne.evaluate('(b*b1*c - b2*c*d - b*b3*e + b3*d*f + b2*e*f - b1*f2) / det')
-        X[..., 1] = ne.evaluate('(a*b2*c - b1*c*d + b3*d*e - b2*e2 - a*b3*f + b1*e*f) / det')
-        X[..., 2] = ne.evaluate('(a*b*b3 - b3*d2 - b*b1*e + b2*d*e - a*b2*f + b1*d*f) / det')
+        X = np.zeros(B.shape, order="F")
+        X[..., 0] = ne.evaluate("(b*b1*c - b2*c*d - b*b3*e + b3*d*f + b2*e*f - b1*f2) / det")
+        X[..., 1] = ne.evaluate("(a*b2*c - b1*c*d + b3*d*e - b2*e2 - a*b3*f + b1*e*f) / det")
+        X[..., 2] = ne.evaluate("(a*b*b3 - b3*d2 - b*b1*e + b2*d*e - a*b2*f + b1*d*f) / det")
 
         return X
     else:
         return np.linalg.solve(A, B)
 
 
-@guvectorize(['void(float64[:], float64[:,:,:,:], float64[:])'],
-             '(N),(M,i,i,i)->(M)')
+@guvectorize(["void(float64[:], float64[:,:,:,:], float64[:])"], "(N),(M,i,i,i)->(M)")
 def trilinear_interpolation(pos, v, ret):
-    '''Compute the trilinear interpolation of data at given position
+    """Compute the trilinear interpolation of data at given position
 
     Arguments
     ---------
@@ -151,9 +156,9 @@ def trilinear_interpolation(pos, v, ret):
     The original code is from
     http://paulbourke.net/miscellaneous/interpolation/
 
-    '''
+    """
     xl, yl, zl = pos
-    xr, yr, zr = 1-pos
+    xr, yr, zr = 1 - pos
 
     # Note the (inverse) order here!
     x = (xr, xl)
@@ -205,7 +210,9 @@ def gradient(A, axis, dx=1):
                     ijkl[2] -= 1
                     ijkr[2] += 1
 
-                out[i, j, k] = (A[ijkr[0], ijkr[1], ijkr[2]] - A[ijkl[0], ijkl[1], ijkl[2]]) / 2 / dx
+                out[i, j, k] = (
+                    (A[ijkr[0], ijkr[1], ijkr[2]] - A[ijkl[0], ijkl[1], ijkl[2]]) / 2 / dx
+                )
 
     # Left edge
     if axis == 0:
@@ -235,13 +242,13 @@ def gradient(A, axis, dx=1):
 
     # Right edge
     if axis == 0:
-        i0 = A.shape[0]-1
+        i0 = A.shape[0] - 1
         iN = A.shape[0]
     elif axis == 1:
-        j0 = A.shape[1]-1
+        j0 = A.shape[1] - 1
         jN = A.shape[1]
     elif axis == 2:
-        k0 = A.shape[2]-1
+        k0 = A.shape[2] - 1
         kN = A.shape[2]
 
     for i in range(i0, iN):
@@ -263,8 +270,8 @@ def gradient(A, axis, dx=1):
 
 
 @jit(looplift=True)
-def measure_hessian_3d(position, data, LE=np.array([0, 0, 0])):
-    '''Compute the value of the hessian of the field at the given position.
+def measure_hessian_3d(position, data, LE=None):
+    """Compute the value of the hessian of the field at the given position.
 
     Arguments
     ---------
@@ -272,7 +279,9 @@ def measure_hessian_3d(position, data, LE=np.array([0, 0, 0])):
        The position of the points in space in pixel units.
     data : ndarray (Npt, Npt, Npt)
        The field itself
-    '''
+    """
+    if LE is None:
+        LE = np.array([0, 0, 0])
     LE = np.asarray(LE)
     Npt = len(position)
     N = data.shape[0]
@@ -291,8 +300,8 @@ def measure_hessian_3d(position, data, LE=np.array([0, 0, 0])):
     for ipt in range(Npt):
         pos = position[ipt] - LE
 
-        ipos[:] = pos-2
-        jpos[:] = ipos+6
+        ipos[:] = pos - 2
+        jpos[:] = ipos + 6
         dpos[:] = pos - ipos - 2
 
         # Copy data with periodic boundaries
@@ -304,7 +313,7 @@ def measure_hessian_3d(position, data, LE=np.array([0, 0, 0])):
         # Compute hessian using finite difference
         ii = 0
         for i in range(3):
-            for jdim in range(i+1):
+            for jdim in range(i + 1):
                 tmp_buff[:] = gradient(gradient(buff, axis=i), axis=jdim)
                 hij_buff[ii, :, :, :] = tmp_buff[2:4, 2:4, 2:4]
 
@@ -314,15 +323,16 @@ def measure_hessian_3d(position, data, LE=np.array([0, 0, 0])):
         tmp = trilinear_interpolation(dpos, hij_buff)
         ii = 0
         for i in range(3):
-            for jdim in range(i+1):
-                ret[ipt, i, jdim] = \
-                  ret[ipt, jdim, i] = tmp[ii]
+            for jdim in range(i + 1):
+                ret[ipt, i, jdim] = ret[ipt, jdim, i] = tmp[ii]
                 ii += 1
 
     return ret
 
 
-def measure_hessian(position, data, LE=np.array([0, 0, 0])):
+def measure_hessian(position, data, LE=None):
+    if LE is None:
+        LE = np.array([0, 0, 0])
     Ndim = data.ndim
     Npt = len(position)
     N = data.shape[0]
@@ -331,14 +341,14 @@ def measure_hessian(position, data, LE=np.array([0, 0, 0])):
         return measure_hessian_3d(position, data, LE)
 
     # Pad one in each dimension for the regular grid interpolation
-    data_padded = np.pad(data, [(1, 1)]*Ndim, 'wrap')
-    grid = [np.arange(-1, N+1)]*Ndim
+    data_padded = np.pad(data, [(1, 1)] * Ndim, "wrap")
+    grid = [np.arange(-1, N + 1)] * Ndim
 
     grad = [np.gradient(data_padded, axis=_) for _ in range(Ndim)]
-    hess_flat = np.stack([
-        np.gradient(grad[i], axis=j)
-        for i in range(Ndim)
-        for j in range(i, Ndim)], axis=-1)
+    hess_flat = np.stack(
+        [np.gradient(grad[i], axis=j) for i in range(Ndim) for j in range(i, Ndim)],
+        axis=-1,
+    )
     interpolator = RegularGridInterpolator(grid, hess_flat)
 
     # Unpack in Ndim x Ndim
@@ -353,8 +363,8 @@ def measure_hessian(position, data, LE=np.array([0, 0, 0])):
 
 
 @jit(looplift=True)
-def measure_gradient(position, data, LE=np.array([0, 0, 0])):
-    '''Compute the value of the gradient of the field at the given position.
+def measure_gradient(position, data, LE=None):
+    """Compute the value of the gradient of the field at the given position.
 
     Arguments
     ---------
@@ -362,7 +372,9 @@ def measure_gradient(position, data, LE=np.array([0, 0, 0])):
        The position of the points in space in pixel units.
     data : ndarray (Npt, Npt, Npt)
        The field itself
-    '''
+    """
+    if LE is None:
+        LE = np.array([0, 0, 0])
     LE = np.asarray(LE)
     Npt = len(position)
     N = data.shape[0]
@@ -380,8 +392,8 @@ def measure_gradient(position, data, LE=np.array([0, 0, 0])):
     for ipt in range(Npt):
         pos = position[ipt] - LE
 
-        ipos[:] = pos-1
-        jpos[:] = ipos+4
+        ipos[:] = pos - 1
+        jpos[:] = ipos + 4
         dpos[:] = pos - ipos - 1
 
         # Copy data with periodic boundaries
@@ -409,7 +421,7 @@ def measure_gradient(position, data, LE=np.array([0, 0, 0])):
 
 
 def measure_third_derivative(position, data, eigenvectors):
-    '''Measure the third derivative in the eigenframe
+    """Measure the third derivative in the eigenframe
 
     Arguments
     ---------
@@ -426,15 +438,16 @@ def measure_third_derivative(position, data, eigenvectors):
     Notes
     -----
     The "x" axis is taken along the first eigenvector.
-    '''
+    """
     N, Ndim = position.shape
     M = eigenvectors.shape[0]
 
     if eigenvectors.shape != (N, Ndim, Ndim):
-        raise Exception(f'Wrong shape for eigenvectors: {eigenvectors.shape}, '
-                        f'expected {(N, Ndim, Ndim)}.')
+        raise Exception(
+            f"Wrong shape for eigenvectors: {eigenvectors.shape}, " f"expected {(N, Ndim, Ndim)}."
+        )
     if Ndim != 3:
-        raise Exception(f'Got dimension {Ndim}, expected Ndim=3.')
+        raise Exception(f"Got dimension {Ndim}, expected Ndim=3.")
 
     e1 = eigenvectors[..., 0]
     e2 = eigenvectors[..., 1]
@@ -443,17 +456,18 @@ def measure_third_derivative(position, data, eigenvectors):
     # Extend the field for interpolation
     F = data
     M = F.shape[0]
-    Fext = np.zeros((M+2, M+2, M+2))
+    Fext = np.zeros((M + 2, M + 2, M + 2))
     x0 = position
 
     # Interpolate field along three eigenvectors
-    a1, a2, a3 = np.meshgrid([-2, -1, 0, 1, 2], [-1, 0, 1], [-1, 0, 1],
-                             indexing='ij')
+    a1, a2, a3 = np.meshgrid([-2, -1, 0, 1, 2], [-1, 0, 1], [-1, 0, 1], indexing="ij")
     NA = np.newaxis
-    xi = (a1[NA, :, :, :, NA] * e1[:, NA, NA, NA, :] +
-          a2[NA, :, :, :, NA] * e2[:, NA, NA, NA, :] +
-          a3[NA, :, :, :, NA] * e3[:, NA, NA, NA, :] +
-          x0[:, NA, NA, NA, :]) % M
+    xi = (
+        a1[NA, :, :, :, NA] * e1[:, NA, NA, NA, :]
+        + a2[NA, :, :, :, NA] * e2[:, NA, NA, NA, :]
+        + a3[NA, :, :, :, NA] * e3[:, NA, NA, NA, :]
+        + x0[:, NA, NA, NA, :]
+    ) % M
 
     # Extend field on boundaries for linear interpolation near edges
     sl1 = (slice(1, -1), slice(None))
@@ -462,22 +476,22 @@ def measure_third_derivative(position, data, eigenvectors):
 
     sl_all = (sl1, sl2, sl3)
 
-    for (sx1, sx2), (sy1, sy2), (sz1, sz2) in product(*[sl_all]*3):
-        Fext[tuple((sx1, sy1, sz1))] = F[tuple((sx2, sy2, sz2))]
+    for (sx1, sx2), (sy1, sy2), (sz1, sz2) in product(*[sl_all] * 3):
+        Fext[(sx1, sy1, sz1)] = F[(sx2, sy2, sz2)]
 
     # Interpolate third derivative using second order finite
     # difference. Values has shape (3, Npt, 5)
-    xx = np.arange(-1, M+1)
+    xx = np.arange(-1, M + 1)
     v = interpn((xx, xx, xx), Fext, xi)
 
-    D0 = [         0,  1,   0     ]
-    D1 = [   0, -1/2,  0, 1/2,   0]  # 2nd order 1-derivative
-    D2 = [         1, -2,   1     ]  # 2nd order 2-derivative
-    D3 = [-1/2,    1,  0,  -1, 1/2]  # 2nd order 3-derivative
+    D0 = [0, 1, 0]
+    D1 = [0, -1 / 2, 0, 1 / 2, 0]  # 2nd order 1-derivative
+    D2 = [1, -2, 1]  # 2nd order 2-derivative
+    D3 = [-1 / 2, 1, 0, -1, 1 / 2]  # 2nd order 3-derivative
 
     # D1 = [ 1/12, -2/3, 0, 2/3, -1/12]  # 4th order 1-derivative
-    F111 = np.einsum('...ijk,i,j,k', v, D3, D0, D0)
-    F122 = np.einsum('...ijk,i,j,k', v, D1, D2, D0)
-    F133 = np.einsum('...ijk,i,j,k', v, D1, D0, D2)
+    F111 = np.einsum("...ijk,i,j,k", v, D3, D0, D0)
+    F122 = np.einsum("...ijk,i,j,k", v, D1, D2, D0)
+    F133 = np.einsum("...ijk,i,j,k", v, D1, D0, D2)
 
     return np.array((F111, F122, F133)).T
