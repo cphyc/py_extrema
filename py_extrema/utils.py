@@ -44,7 +44,7 @@ def get_xyz_keys(Ndim):
     return keys
 
 
-@dataclass(frozen=True)
+@dataclass
 class CriticalPoints:
     pos: npt.NDArray[np.float_]
     eigvals: npt.NDArray[np.float_]
@@ -96,39 +96,73 @@ def solve(A, B):
 
     N = A.shape[-1]
     if N == 2:
-        A[..., 0, 0]
-        A[..., 1, 1]
-        A[..., 0, 1]
+        a = A[..., 0, 0]
+        b = A[..., 1, 1]
+        c = A[..., 0, 1]
 
-        B[..., 0]
-        B[..., 1]
+        b1 = B[..., 0]
+        b2 = B[..., 1]
 
-        ne.evaluate("a*b - c**2")
+        local_dict = {
+            "a": a,
+            "b": b,
+            "c": c,
+            "b1": b1,
+            "b2": b2,
+        }
+        det = ne.evaluate("a*b - c**2", local_dict=local_dict)
 
+        local_dict["det"] = det
         X = np.zeros(B.shape, order="F")
-        X[..., 0] = ne.evaluate("(b*b1 - b2*c) / det")
-        X[..., 1] = ne.evaluate("(a*b2 - b1*c) / det")
+        X[..., 0] = ne.evaluate("(b*b1 - b2*c) / det", local_dict=local_dict)
+        X[..., 1] = ne.evaluate("(a*b2 - b1*c) / det", local_dict=local_dict)
 
         return X
 
     elif N == 3:
-        A[..., 0, 0]
-        A[..., 1, 1]
-        A[..., 2, 2]
-        A[..., 0, 1]
-        A[..., 0, 2]
-        A[..., 1, 2]
+        a = A[..., 0, 0]
+        b = A[..., 1, 1]
+        c = A[..., 2, 2]
+        d = A[..., 0, 1]
+        e = A[..., 0, 2]
+        f = A[..., 1, 2]
 
-        B[..., 0]
-        B[..., 1]
-        B[..., 2]
+        b1 = B[..., 0]
+        b2 = B[..., 1]
+        b3 = B[..., 2]
 
-        ne.evaluate("a*b*c - a*f2 - b*e2 - c*d2 + 2*d*e*f")
+        d2 = d * d
+        e2 = e * e
+        f2 = f * f
 
+        local_dict = {
+            "a": a,
+            "b": b,
+            "c": c,
+            "d": d,
+            "e": e,
+            "f": f,
+            "b1": b1,
+            "b2": b2,
+            "b3": b3,
+            "d2": d2,
+            "e2": e2,
+            "f2": f2,
+        }
+
+        det = ne.evaluate("a*b*c - a*f2 - b*e2 - c*d2 + 2*d*e*f", local_dict=local_dict)
+
+        local_dict["det"] = det
         X = np.zeros(B.shape, order="F")
-        X[..., 0] = ne.evaluate("(b*b1*c - b2*c*d - b*b3*e + b3*d*f + b2*e*f - b1*f2) / det")
-        X[..., 1] = ne.evaluate("(a*b2*c - b1*c*d + b3*d*e - b2*e2 - a*b3*f + b1*e*f) / det")
-        X[..., 2] = ne.evaluate("(a*b*b3 - b3*d2 - b*b1*e + b2*d*e - a*b2*f + b1*d*f) / det")
+        X[..., 0] = ne.evaluate(
+            "(b*b1*c - b2*c*d - b*b3*e + b3*d*f + b2*e*f - b1*f2) / det", local_dict=local_dict
+        )
+        X[..., 1] = ne.evaluate(
+            "(a*b2*c - b1*c*d + b3*d*e - b2*e2 - a*b3*f + b1*e*f) / det", local_dict=local_dict
+        )
+        X[..., 2] = ne.evaluate(
+            "(a*b*b3 - b3*d2 - b*b1*e + b2*d*e - a*b2*f + b1*d*f) / det", local_dict=local_dict
+        )
 
         return X
     else:

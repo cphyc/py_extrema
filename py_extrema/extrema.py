@@ -343,7 +343,7 @@ class ExtremaFinder:
         if R not in self.data_smooth_f:
             self.smooth(R)
 
-        self.data_smooth_f[R]
+        data_f = self.data_smooth_f[R]
         ndim = self.ndim
         kgrid = self.kgrid
         ihess = 0
@@ -352,12 +352,16 @@ class ExtremaFinder:
         logger.debug("Computing hessian and gradient in Fourier space.")
         # Compute hessian and gradient in Fourier space
         for idim in range(ndim):
-            kgrid[idim]
-            self.grad_f[idim, ...] = ne.evaluate("data_f * 1j * k1")
+            k1 = kgrid[idim]  # noqa: F841
+            self.grad_f[idim, ...] = ne.evaluate(
+                "data_f * 1j * k1", local_dict={"data_f": data_f, "k1": k1}
+            )
             for idim2 in range(idim, ndim):
-                kgrid[idim2]
-                self.grad_f[idim, ...]
-                self.hess_f[ihess, ...] = ne.evaluate("grad_f * 1j * k2")
+                k2 = kgrid[idim2]
+                grad_f = self.grad_f[idim, ...]
+                self.hess_f[ihess, ...] = ne.evaluate(
+                    "grad_f * 1j * k2", local_dict={"grad_f": grad_f, "k2": k2}
+                )
 
                 indices[idim, idim2] = indices[idim2, idim] = ihess
                 ihess += 1

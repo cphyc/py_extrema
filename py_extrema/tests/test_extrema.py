@@ -1,13 +1,28 @@
 import numpy as np
+import pytest
 
 from py_extrema.extrema import ExtremaFinder
 
 N = 100
-ndim = 2
-np.random.seed(16091992)
-data = {}
-for ndim in [1, 2]:
-    data[ndim] = np.random.rand(*[N] * ndim)
+
+
+@pytest.fixture
+def data3d():
+    np.random.seed(16091992)
+    return np.random.normal(size=(N, N, N))
+
+
+@pytest.fixture
+def data2d():
+    np.random.seed(16091992)
+    return np.random.normal(size=(N, N))
+
+
+@pytest.fixture
+def data1d():
+    np.random.seed(16091992)
+    return np.random.normal(size=(N))
+
 
 _PLOT = True
 
@@ -16,9 +31,9 @@ if _PLOT:
     from scipy.interpolate import interp1d
 
 
-def testGradientHessian():
+def testGradientHessian(data1d):
     ndim = 1
-    ef = ExtremaFinder(data[1])
+    ef = ExtremaFinder(data1d)
     ef.compute_derivatives(N / 10)
 
     grad = ef.grad[0]
@@ -81,9 +96,9 @@ def testSmoothing1D():
         plt.close()
 
 
-def testSmoothing2D():
+def testSmoothing2D(data2d):
     ndim = 2
-    ef = ExtremaFinder(data[2])
+    ef = ExtremaFinder(data2d)
     data_smoothed = ef.smooth(N / 10)
 
     # TODO: check we have correctly smoothed at scale R
@@ -97,8 +112,8 @@ def testSmoothing2D():
         plt.close()
 
 
-def testExtrema1D():
-    ef = ExtremaFinder(data[1])
+def testExtrema1D(data1d):
+    ef = ExtremaFinder(data1d)
     R = N / 50
     extr = ef.find_extrema(R)
 
@@ -118,8 +133,8 @@ def testExtrema1D():
         plt.close()
 
 
-def testExtrema2D():
-    ef = ExtremaFinder(data[2])
+def testExtrema2D(data2d):
+    ef = ExtremaFinder(data2d)
     R = N / 20
     extr = ef.find_extrema(R)
 
@@ -127,8 +142,9 @@ def testExtrema2D():
 
     if _PLOT:
         plt.figure()
-        plt.imshow(field.T)
-        for kind in [0, 1, 2]:
+        vmax = np.abs(field).max()
+        plt.imshow(field.T, vmin=-vmax, vmax=vmax, cmap="bwr")
+        for kind in (0, 1, 2):
             m = extr.kind == kind
             plt.plot(extr.pos[m, 0], extr.pos[m, 1], ".", label=f"kind={kind}")
 
@@ -136,4 +152,29 @@ def testExtrema2D():
         plt.ylim(0, N)
         plt.legend()
         plt.savefig("extrema_2D.pdf")
+        plt.close()
+
+
+def testExtrema3D(data3d):
+    ef = ExtremaFinder(data3d)
+    R = N / 20
+    extr = ef.find_extrema(R)
+
+    field = ef.smooth(R)
+
+    if _PLOT:
+        plt.figure()
+        vmax = np.abs(field).max()
+        # Find y coordinate of maximum
+        jmax = np.unravel_index(np.argmax(field), field.shape)[1]
+
+        plt.imshow(field.T[:, jmax, :], vmin=-vmax, vmax=vmax, cmap="RdBu_r")
+        for kind in (0, 1, 2, 3):
+            m = (extr.kind == kind) & (np.round(extr.pos[:, 1]) == jmax)
+            plt.plot(extr.pos[m, 0], extr.pos[m, 2], ".", label=f"kind={kind}")
+
+        plt.xlim(0, N)
+        plt.ylim(0, N)
+        plt.legend()
+        plt.savefig("extrema_3D.pdf")
         plt.close()
